@@ -242,8 +242,8 @@ async def format_user_card(user: User, session: AsyncSession,
         card_parts.append(f"{_('admin_user_referral_label')} {hcode(str(user.referred_by_id))}")
     
     # Panel info
-    if user.panel_user_uuid:
-        card_parts.append(f"{_('admin_user_panel_uuid_label')} {hcode(user.panel_user_uuid[:8] + '...' if len(user.panel_user_uuid) > 8 else user.panel_user_uuid)}")
+    if user.panel_user_id:
+        card_parts.append(f"{_('admin_user_panel_id_label')} {hcode(str(user.panel_user_id))}")
     
     card_parts.append("")  # Empty line
     
@@ -488,9 +488,9 @@ async def handle_toggle_ban(callback: types.CallbackQuery, user: User,
         await user_dal.update_user(session, user.user_id, {"is_banned": new_ban_status})
         
         # Update on panel if user has panel UUID
-        if user.panel_user_uuid:
+        if user.panel_user_id:
             panel_status = "DISABLED" if new_ban_status else "ACTIVE"
-            await panel_service.update_user_status_on_panel(user.panel_user_uuid, not new_ban_status)
+            await panel_service.update_user_status_on_panel(user.panel_user_id, not new_ban_status)
         
         await session.commit()
         
@@ -796,9 +796,9 @@ async def process_delete_user_confirmation_handler(message: types.Message,
         return
 
     try:
-        if user_model.panel_user_uuid:
+        if user_model.panel_user_id:
             panel_deleted = await panel_service.delete_user_from_panel(
-                user_model.panel_user_uuid
+                user_model.panel_user_id
             )
             if not panel_deleted:
                 await message.answer(
@@ -1178,8 +1178,8 @@ async def process_ban_user_handler(message: types.Message, state: FSMContext,
         await user_dal.update_user(session, user_model.user_id, {"is_banned": True})
         
         # Update on panel if user has panel UUID
-        if user_model.panel_user_uuid:
-            await panel_service.update_user_status_on_panel(user_model.panel_user_uuid, False)
+        if user_model.panel_user_id:
+            await panel_service.update_user_status_on_panel(user_model.panel_user_id, False)
         
         await session.commit()
         
@@ -1245,8 +1245,8 @@ async def process_unban_user_handler(message: types.Message, state: FSMContext,
         await user_dal.update_user(session, user_model.user_id, {"is_banned": False})
         
         # Update on panel if user has panel UUID
-        if user_model.panel_user_uuid:
-            await panel_service.update_user_status_on_panel(user_model.panel_user_uuid, True)
+        if user_model.panel_user_id:
+            await panel_service.update_user_status_on_panel(user_model.panel_user_id, True)
         
         await session.commit()
         

@@ -250,11 +250,11 @@ class PanelApiService:
         logging.info(f"Fetched {len(all_users)} users from panel API.")
         return all_users
 
-    async def get_user_by_uuid(
+    async def get_user_by_panel_id(
             self,
-            user_uuid: str,
+            panel_user_id: int,
             log_response: bool = True) -> Optional[Dict[str, Any]]:
-        endpoint = f"/users/{user_uuid}"
+        endpoint = f"/users/{panel_user_id}"
         full_response = await self._request("GET",
                                             endpoint,
                                             log_full_response=log_response)
@@ -267,93 +267,109 @@ class PanelApiService:
     async def get_user(
         self,
         *,
-        uuid: Optional[str] = None,
+        panel_user_id: Optional[int] = None,
         telegram_id: Optional[int] = None,
         username: Optional[str] = None,
-        email: Optional[str] = None,
         log_response: bool = True,
     ) -> Optional[Dict[str, Any]]:
-        if uuid:
-            return await self.get_user_by_uuid(uuid, log_response=log_response)
+        if panel_user_id is not None:
+            return await self.get_user_by_panel_id(panel_user_id,
+                                                   log_response=log_response)
 
         users = await self.get_users_by_filter(
             telegram_id=telegram_id,
             username=username,
-            email=email,
             log_response=log_response,
         )
         if users:
             return users[0]
         return None
 
+    @staticmethod
+    def _error_code(response_data: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Remnawave error code (e.g. A025) from a failed _request() result."""
+        if not response_data:
+            return None
+        details = response_data.get("details") or {}
+        return details.get("errorCode") or response_data.get("errorCode")
+
+    @classmethod
+    def _is_not_found(cls, response_data: Optional[Dict[str, Any]]) -> bool:
+        # A025 USER_NOT_FOUND, A062 USERS_NOT_FOUND (both HTTP 404 in Remnawave 3.x)
+        return bool(response_data) and (
+            cls._error_code(response_data) in {"A025", "A062"}
+            or response_data.get("status_code") == 404)
+
     async def get_users_by_filter(
             self,
             telegram_id: Optional[int] = None,
             username: Optional[str] = None,
-            email: Optional[str] = None,
             log_response: bool = True) -> Optional[List[Dict[str, Any]]]:
-
-        response_data = None
-        filter_used_log = "No filter specified"
-
+        """
+        Remnawave 3.x dropped /users/by-telegram-id and /users/by-email.
+        telegram_id -> GET /users/stream?telegramId= (exact match, cursor pagination);
+        username    -> GET /users/by-username/{username}.
+        Returns [] when nothing is found, None on API failure.
+        """
         if telegram_id is not None:
-            filter_used_log = f"telegramId={telegram_id}"
-            endpoint = f"/users/by-telegram-id/{telegram_id}"
-            response_data = await self._request("GET",
-                                                endpoint,
-                                                log_full_response=log_response)
+            return await self._get_users_by_telegram_id(int(telegram_id),
+                                                        log_response=log_response)
 
-            if response_data and not response_data.get(
-                    "error") and "response" in response_data and isinstance(
-                        response_data["response"], list):
-                return response_data["response"]
-            elif response_data and response_data.get("errorCode") == "A062":
-                logging.info(
-                    f"Panel API: Users not found for {filter_used_log}")
-                return []
-
-        elif username is not None:
-            filter_used_log = f"username={username}"
-            endpoint = f"/users/by-username/{username}"
-            response_data = await self._request("GET",
-                                                endpoint,
-                                                log_full_response=log_response)
-
-            if response_data and not response_data.get(
-                    "error") and "response" in response_data and isinstance(
-                        response_data["response"], dict):
-                return [response_data["response"]]
-            elif response_data and response_data.get("errorCode") == "A062":
-                logging.info(
-                    f"Panel API: User not found for {filter_used_log}")
-                return []
-
-        elif email is not None:
-            filter_used_log = f"email={email}"
-            endpoint = f"/users/by-email/{email}"
-            response_data = await self._request("GET",
-                                                endpoint,
-                                                log_full_response=log_response)
-
-            if response_data and not response_data.get(
-                    "error") and "response" in response_data and isinstance(
-                        response_data["response"], list):
-                return response_data["response"]
-            elif response_data and response_data.get("errorCode") == "A062":
-                logging.info(
-                    f"Panel API: Users not found for {filter_used_log}")
-                return []
-
-        if not telegram_id and not username and not email:
+        if username is None:
             logging.warning(
-                "get_users_by_filter called without any specific filter criteria."
-            )
+                "get_users_by_filter called without any specific filter criteria.")
+            return []
+
+        endpoint = f"/users/by-username/{username}"
+        response_data = await self._request("GET",
+                                            endpoint,
+                                            log_full_response=log_response)
+
+        if response_data and not response_data.get(
+                "error") and isinstance(response_data.get("response"), dict):
+            return [response_data["response"]]
+
+        if self._is_not_found(response_data):
+            logging.info(f"Panel API: user not found for username={username}")
             return []
 
         logging.error(
-            f"Failed to fetch panel users with filter ({filter_used_log}). Last API response: {response_data if not log_response else '(logged above)'}"
+            f"Failed to fetch panel user by username={username}. Last API response: {response_data if not log_response else '(logged above)'}"
         )
         return None
+
+    async def _get_users_by_telegram_id(
+            self,
+            telegram_id: int,
+            log_response: bool = True,
+            max_pages: int = 20) -> Optional[List[Dict[str, Any]]]:
+        users: List[Dict[str, Any]] = []
+        cursor: Optional[int] = None
+        for _ in range(max_pages):
+            params: Dict[str, Any] = {"telegramId": str(telegram_id), "size": 100}
+            if cursor is not None:
+                params["cursor"] = cursor
+            response_data = await self._request("GET",
+                                                "/users/stream",
+                                                params=params,
+                                                log_full_response=log_response)
+            if not response_data or response_data.get("error"):
+                if self._is_not_found(response_data):
+                    return users
+                logging.error(
+                    f"Failed to fetch panel users by telegramId={telegram_id}. Last API response: {response_data if not log_response else '(logged above)'}"
+                )
+                return None
+            body = response_data.get("response") or {}
+            # The panel filters with an exact match; re-check defensively.
+            users.extend(u for u in body.get("users") or []
+                         if u.get("telegramId") == telegram_id)
+            if not body.get("hasMore") or body.get("nextCursor") is None:
+                break
+            cursor = body["nextCursor"]
+        if not users:
+            logging.info(f"Panel API: users not found for telegramId={telegram_id}")
+        return users
 
     async def create_panel_user(
             self,
@@ -424,7 +440,7 @@ class PanelApiService:
                                        log_full_response=log_response)
         if response and not response.get("error") and "response" in response:
             logging.info(
-                f"Panel user '{username_on_panel}' created successfully (UUID: {response.get('response',{}).get('uuid')})."
+                f"Panel user '{username_on_panel}' created successfully (id: {response.get('response',{}).get('id')})."
             )
             return response
 
@@ -438,11 +454,12 @@ class PanelApiService:
 
     async def update_user_details_on_panel(
             self,
-            user_uuid: str,
+            panel_user_id: int,
             update_payload: Dict[str, Any],
             log_response: bool = True) -> Optional[Dict[str, Any]]:
-        if 'uuid' not in update_payload:
-            update_payload['uuid'] = user_uuid
+        # PATCH /api/users identifies the target by numeric id or username; there is no
+        # uuid field in the 3.x contract and sending one fails validation.
+        update_payload = {**update_payload, "id": int(panel_user_id)}
 
         full_response = await self._request("PATCH",
                                             "/users",
@@ -450,23 +467,23 @@ class PanelApiService:
                                             log_full_response=log_response)
         if full_response and not full_response.get(
                 "error") and "response" in full_response:
-            logging.info(f"User {user_uuid} details updated on panel.")
+            logging.info(f"User {panel_user_id} details updated on panel.")
             return full_response.get("response")
 
         logging.error(
             "Failed to update user %s details on panel. Payload: %s, Response: %s",
-            user_uuid,
+            panel_user_id,
             self._sanitize_payload_for_log(update_payload),
             full_response if not log_response else "(logged above)",
         )
         return None
 
     async def update_user_status_on_panel(self,
-                                          user_uuid: str,
+                                          panel_user_id: int,
                                           enable: bool,
                                           log_response: bool = True) -> bool:
         action = "enable" if enable else "disable"
-        endpoint = f"/users/{user_uuid}/actions/{action}"
+        endpoint = f"/users/{panel_user_id}/actions/{action}"
         response_data = await self._request("POST",
                                             endpoint,
                                             log_full_response=log_response)
@@ -477,49 +494,48 @@ class PanelApiService:
             expected_status = "ACTIVE" if enable else "DISABLED"
             if actual_status == expected_status:
                 logging.info(
-                    f"User {user_uuid} status on panel successfully set to {action} (Actual: {actual_status})."
+                    f"User {panel_user_id} status on panel successfully set to {action} (Actual: {actual_status})."
                 )
                 return True
             else:
                 logging.warning(
-                    f"User {user_uuid} status on panel action '{action}' called, but final status is '{actual_status}'."
+                    f"User {panel_user_id} status on panel action '{action}' called, but final status is '{actual_status}'."
                 )
                 return False
 
         logging.error(
-            f"Failed to {action} user {user_uuid} on panel. Response: {response_data if not log_response else '(logged above)'}"
+            f"Failed to {action} user {panel_user_id} on panel. Response: {response_data if not log_response else '(logged above)'}"
         )
         return False
 
     async def delete_user_from_panel(self,
-                                     user_uuid: str,
+                                     panel_user_id: int,
                                      log_response: bool = True) -> bool:
         """Delete a user from the panel. Treat not-found as already deleted."""
-        endpoint = f"/users/{user_uuid}"
+        endpoint = f"/users/{int(panel_user_id)}"
         response_data = await self._request(
             "DELETE", endpoint, log_full_response=log_response
         )
 
         if not response_data:
             logging.error(
-                f"Panel API delete_user_from_panel returned no data for user {user_uuid}."
+                f"Panel API delete_user_from_panel returned no data for user {panel_user_id}."
             )
             return False
 
         if response_data.get("error"):
-            details = response_data.get("details") or {}
-            error_code = details.get("errorCode") or response_data.get("errorCode")
-            if error_code in {"A062", "A040"}:
+            if self._is_not_found(response_data):
                 logging.info(
-                    f"Panel user {user_uuid} already absent (errorCode {error_code}). Treating as deleted."
+                    f"Panel user {panel_user_id} already absent (errorCode {self._error_code(response_data)}). Treating as deleted."
                 )
                 return True
             logging.error(
-                f"Failed to delete user {user_uuid} on panel. Response: {response_data}"
+                f"Failed to delete user {panel_user_id} on panel. Response: {response_data}"
             )
             return False
 
-        logging.info(f"Panel user {user_uuid} deleted successfully.")
+        # Remnawave 3.x answers DELETE with an empty 2xx body.
+        logging.info(f"Panel user {panel_user_id} deleted successfully.")
         return True
 
     async def get_subscription_link(
@@ -535,27 +551,31 @@ class PanelApiService:
             return f"{base_sub_url}/{client_type.lower()}"
         return base_sub_url
 
-    async def get_user_devices(self, user_uuid: str) -> Optional[List[Dict[str, Any]]]:
-        endpoint = f"/hwid/devices/{user_uuid}"
+    async def get_user_devices(self, panel_user_id: int) -> Optional[Dict[str, Any]]:
+        """GET /hwid/devices/{userId} -> {"total": int, "devices": [...]}."""
+        if panel_user_id is None:
+            logging.error("get_user_devices called without panel user id.")
+            return None
+        endpoint = f"/hwid/devices/{int(panel_user_id)}"
         response_data = await self._request("GET", endpoint, log_full_response=False)
         if response_data and not response_data.get("error") and "response" in response_data:
             return response_data.get("response")
         logging.error(
-            f"Failed to get user devices for user {user_uuid}. Response: {response_data}"
+            f"Failed to get user devices for user {panel_user_id}. Response: {response_data}"
         )
         return None
 
-    async def disconnect_device(self, user_uuid: str, hwid: str) -> bool:
-        endpoint = f"/hwid/devices/delete"
+    async def disconnect_device(self, panel_user_id: int, hwid: str) -> bool:
+        endpoint = "/hwid/devices/delete"
         payload = {
-            "userUuid": user_uuid,
+            "userId": int(panel_user_id),
             "hwid": hwid
         }
         response_data = await self._request("POST", endpoint, json=payload, log_full_response=False)
         if response_data and not response_data.get("error") and "response" in response_data:
             return True
         logging.error(
-            f"Failed to disconnect device {hwid} for user {user_uuid}. Payload: {payload}, Response: {response_data}"
+            f"Failed to disconnect device {hwid} for user {panel_user_id}. Payload: {payload}, Response: {response_data}"
         )
         return False
 
@@ -595,18 +615,8 @@ class PanelApiService:
         return None
 
     async def encrypt_happ_link(self, link_to_encrypt: str) -> Optional[str]:
-        """Encrypt a subscription link using the panel's happ crypt4 API.
-
-        Returns the encrypted link string or None if encryption failed.
-        """
-        payload = {"linkToEncrypt": link_to_encrypt}
-        response_data = await self._request(
-            "POST",
-            "/system/tools/happ/encrypt",
-            json=payload,
-            log_full_response=False
-        )
-        if response_data and not response_data.get("error") and "response" in response_data:
-            return response_data.get("response", {}).get("encryptedLink")
-        logging.error(f"Failed to encrypt happ link. Response: {response_data}")
+        """Happ crypt4 encryption endpoint (/system/tools/happ/encrypt) was removed in
+        Remnawave 2.8.0; callers fall back to the plain link when None is returned."""
+        logging.warning(
+            "Happ link encryption is not available in Remnawave 3.x; set CRYPT4_ENABLED=False.")
         return None

@@ -282,13 +282,13 @@ async def my_subscription_command_handler(
                 except (TypeError, ValueError):
                     max_devices_display = str(max_devices_value)
             current_devices_display = "?"
-            user_uuid = active.get("user_id")
+            panel_user_id = active.get("user_id")
             devices_response = None
-            if user_uuid:
+            if panel_user_id:
                 try:
-                    devices_response = await panel_service.get_user_devices(user_uuid)
+                    devices_response = await panel_service.get_user_devices(panel_user_id)
                 except Exception:
-                    logging.exception("Failed to load devices for user %s", user_uuid)
+                    logging.exception("Failed to load devices for user %s", panel_user_id)
             if devices_response:
                 devices_count: Optional[int] = None
                 if isinstance(devices_response, dict):

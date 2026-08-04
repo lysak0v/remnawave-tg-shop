@@ -20,7 +20,8 @@ class User(Base):
     registration_date = Column(DateTime(timezone=True),
                                server_default=func.now())
     is_banned = Column(Boolean, default=False)
-    panel_user_uuid = Column(String, nullable=True, unique=True, index=True)
+    panel_user_uuid = Column(String, nullable=True, unique=True, index=True)  # legacy (panel <3.0)
+    panel_user_id = Column(BigInteger, nullable=True, unique=True, index=True)
     referral_code = Column(String(16), nullable=True, unique=True, index=True)
     referred_by_id = Column(BigInteger,
                             ForeignKey("users.user_id"),
@@ -62,7 +63,8 @@ class Subscription(Base):
                      ForeignKey("users.user_id"),
                      nullable=False,
                      index=True)
-    panel_user_uuid = Column(String, nullable=False, index=True)
+    panel_user_uuid = Column(String, nullable=True, index=True)  # legacy (panel <3.0)
+    panel_user_id = Column(BigInteger, nullable=True, index=True)
     panel_subscription_uuid = Column(String,
                                      unique=True,
                                      index=True,
@@ -82,7 +84,7 @@ class Subscription(Base):
     user = relationship("User", back_populates="subscriptions")
 
     def __repr__(self):
-        return f"<Subscription(id={self.subscription_id}, user_id={self.user_id}, panel_uuid='{self.panel_user_uuid}', ends='{self.end_date}')>"
+        return f"<Subscription(id={self.subscription_id}, user_id={self.user_id}, panel_user_id={self.panel_user_id}, ends='{self.end_date}')>"
 
 
 class Payment(Base):
