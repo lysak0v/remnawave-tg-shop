@@ -90,3 +90,9 @@ venv/
 
 # VS Code
 .vscode/
+
+# Tests / dev
+tests/
+requirements-dev.txt
+pytest.ini
+.pytest_cache/

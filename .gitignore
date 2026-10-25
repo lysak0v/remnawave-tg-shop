@@ -19,3 +19,5 @@ locales/en_backup.json
 db/models_old.py
 .serena/
 AGENTS.md
+.pytest_cache/
+__pycache__/
