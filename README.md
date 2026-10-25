@@ -1,5 +1,13 @@
 # Telegram-бот для продажи подписок Remnawave
 
+> **Форк для Remnawave 3.x.** Основан на [kavore/remnawave-tg-shop](https://github.com/kavore/remnawave-tg-shop)
+> (архивирован 2026-03-20, поддерживал панель до 2.x) и адаптирован к **Remnawave 3.x** (проверено на 3.4.7)
+> с использованием патчей [gldkru/remnawave-tg-shop](https://github.com/gldkru/remnawave-tg-shop).
+> Пользователи панели адресуются числовым `id` вместо удалённого `uuid`, поиск по Telegram ID — через `/users/stream`,
+> уведомления об окончании — по событию `user.expiration`. Чеки «Мой налог» (lknpd) сохранены.
+> Образ: `ghcr.io/lysak0v/remnawave-tg-shop` (публичный). Изменения — в [CHANGELOG.md](CHANGELOG.md).
+> С панелью Remnawave 2.x эта версия **не работает**.
+
 Этот Telegram-бот предназначен для автоматизации продажи и управления подписками для панели **Remnawave**. Он интегрируется с API Remnawave для управления пользователями и подписками, а также использует различные платежные системы для приема платежей.
 
 ## ✨ Ключевые возможности
@@ -46,7 +54,7 @@
 
 1.  **Клонируйте репозиторий:**
     ```bash
-    git clone https://github.com/kavore/remnawave-tg-shop
+    git clone https://github.com/lysak0v/remnawave-tg-shop
     cd remnawave-tg-shop
     ```
 
@@ -212,7 +220,7 @@ alembic upgrade head
 ### 1. Клонирование репозитория
 
 ```bash
-git clone https://github.com/kavore/remnawave-tg-shop && cd remnawave-tg-shop
+git clone https://github.com/lysak0v/remnawave-tg-shop && cd remnawave-tg-shop
 ```
 
 ### 2. Настройка переменных окружения

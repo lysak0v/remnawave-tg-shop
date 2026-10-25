@@ -1,6 +1,6 @@
 services:
   remnawave-tg-shop:
-    image: kavore/remnawave-tg-shop:latest
+    image: ghcr.io/lysak0v/remnawave-tg-shop:3.0.0
     container_name: remnawave-tg-shop
     hostname: remnawave-tg-shop
     env_file:
