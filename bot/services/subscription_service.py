@@ -1,7 +1,7 @@
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, NamedTuple, Tuple
 from aiogram import Bot
 from bot.middlewares.i18n import JsonI18n
 
@@ -12,6 +12,47 @@ from db.models import User, Subscription
 
 from config.settings import Settings
 from .panel_api_service import PanelApiService
+
+
+class PanelUserLink(NamedTuple):
+    panel_user_id: Optional[int]
+    panel_sub_link_id: Optional[str]
+    panel_short_uuid: Optional[str]
+    created_or_linked_now: bool
+    panel_user: Optional[Dict[str, Any]] = None
+    created_now: bool = False
+
+
+def _parse_panel_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def resolve_extension_base(
+    now: datetime,
+    panel_expire_at: Optional[datetime],
+    local_end_date: Optional[datetime],
+    panel_user_created_now: bool,
+) -> datetime:
+    """Date a paid period or bonus days are added to.
+
+    The panel is the source of truth for the expiry (admins may change it there).
+    A panel user created in this very call carries only a placeholder expiry, so the
+    period starts now. The local DB end date is used only when the panel gave no date.
+    """
+    if panel_user_created_now:
+        return now
+    reference = panel_expire_at if panel_expire_at is not None else local_end_date
+    if reference is not None and reference > now:
+        return reference
+    return now
 
 
 class SubscriptionService:
@@ -72,6 +113,13 @@ class SubscriptionService:
     async def _get_or_create_panel_user_link_details(
         self, session: AsyncSession, user_id: int, db_user: Optional[User] = None
     ) -> Tuple[Optional[int], Optional[str], Optional[str], bool]:
+        link = await self._ensure_panel_user(session, user_id, db_user)
+        return (link.panel_user_id, link.panel_sub_link_id, link.panel_short_uuid,
+                link.created_or_linked_now)
+
+    async def _ensure_panel_user(
+        self, session: AsyncSession, user_id: int, db_user: Optional[User] = None
+    ) -> "PanelUserLink":
         if not db_user:
             db_user = await user_dal.get_user_by_id(session, user_id)
 
@@ -79,13 +127,14 @@ class SubscriptionService:
             logging.error(
                 f"_get_or_create_panel_user_link_details: User {user_id} not found in local DB. Cannot proceed."
             )
-            return None, None, None, False
+            return PanelUserLink(None, None, None, False)
 
         current_local_panel_id = db_user.panel_user_id
         panel_username_on_panel_standard = f"tg_{user_id}"
 
         panel_user_obj_from_api = None
         panel_user_created_or_linked_now = False
+        panel_user_created_now = False
 
         panel_users_by_tg_id_list = await self.panel_service.get_users_by_filter(
             telegram_id=user_id
@@ -99,7 +148,7 @@ class SubscriptionService:
             logging.error(
                 f"CRITICAL: Multiple panel users found for telegramId {user_id}. Manual intervention needed."
             )
-            return None, None, None, False
+            return PanelUserLink(None, None, None, False)
 
         if not panel_user_obj_from_api:
             if current_local_panel_id:
@@ -137,9 +186,10 @@ class SubscriptionService:
                     ):
                         panel_user_obj_from_api = creation_response.get("response")
                         panel_user_created_or_linked_now = True
+                        panel_user_created_now = True
                     else:
                         await self._notify_admin_panel_user_creation_failed(user_id)
-                        return None, None, None, False
+                        return PanelUserLink(None, None, None, False)
 
             else:
 
@@ -166,6 +216,7 @@ class SubscriptionService:
                 ):
                     panel_user_obj_from_api = creation_response.get("response")
                     panel_user_created_or_linked_now = True
+                    panel_user_created_now = True
 
                 elif creation_response and creation_response.get("errorCode") == "A019":
                     logging.warning(
@@ -184,18 +235,20 @@ class SubscriptionService:
                         f"Failed to create or link panel user for TG_ID {user_id} with panel username '{panel_username_on_panel_standard}'. Response: {creation_response if 'creation_response' in locals() else 'N/A'}"
                     )
                     await self._notify_admin_panel_user_creation_failed(user_id)
-                    return None, None, None, False
+                    return PanelUserLink(None, None, None, False)
 
         if not panel_user_obj_from_api:
             logging.error(
                 f"Could not obtain panel user object for TG user {user_id} after all checks."
             )
 
-            return (
+            return PanelUserLink(
                 current_local_panel_id if current_local_panel_id else None,
                 None,
                 None,
                 panel_user_created_or_linked_now,
+                panel_user=panel_user_obj_from_api,
+                created_now=panel_user_created_now,
             )
 
         actual_panel_id_from_api = panel_user_obj_from_api.get("id")
@@ -206,11 +259,13 @@ class SubscriptionService:
             logging.error(
                 f"Panel user object for TG user {user_id} does not contain 'id'. Data: {panel_user_obj_from_api}"
             )
-            return (
+            return PanelUserLink(
                 current_local_panel_id,
                 None,
                 None,
                 panel_user_created_or_linked_now,
+                panel_user=panel_user_obj_from_api,
+                created_now=panel_user_created_now,
             )
 
         needs_local_panel_id_update = False
@@ -239,7 +294,7 @@ class SubscriptionService:
                     f"Cannot update panel_user_id for user {user_id}. Manual data correction needed."
                 )
 
-                return None, None, None, False
+                return PanelUserLink(None, None, None, False)
             else:
 
                 update_data_for_local_user = {
@@ -296,11 +351,13 @@ class SubscriptionService:
                 f"No subscriptionUuid or shortUuid found on panel for panel_user_id {current_local_panel_id} (TG ID: {user_id})."
             )
 
-        return (
+        return PanelUserLink(
             current_local_panel_id,
             panel_sub_link_id,
             panel_short_uuid,
             panel_user_created_or_linked_now,
+            panel_user=panel_user_obj_from_api,
+            created_now=panel_user_created_now,
         )
 
     async def activate_trial_subscription(
@@ -531,6 +588,40 @@ class SubscriptionService:
             "traffic_limit_bytes": new_limit,
         }
 
+    def _extension_base_for(
+        self,
+        user_id: int,
+        panel_link: "PanelUserLink",
+        local_end_date: Optional[datetime],
+    ) -> datetime:
+        panel_expire_at = _parse_panel_datetime(
+            (panel_link.panel_user or {}).get("expireAt")
+        )
+        if panel_expire_at is None and not panel_link.created_now:
+            logging.warning(
+                "Panel expireAt unavailable for user %s (panel id %s); extending from local end date %s.",
+                user_id,
+                panel_link.panel_user_id,
+                local_end_date,
+            )
+        elif (
+            local_end_date is not None
+            and panel_expire_at is not None
+            and abs((panel_expire_at - local_end_date).total_seconds()) > 60
+        ):
+            logging.info(
+                "Expiry for user %s differs: panel %s vs local %s; using panel.",
+                user_id,
+                panel_expire_at,
+                local_end_date,
+            )
+        return resolve_extension_base(
+            datetime.now(timezone.utc),
+            panel_expire_at,
+            local_end_date,
+            panel_link.created_now,
+        )
+
     async def activate_subscription(
         self,
         session: AsyncSession,
@@ -562,9 +653,8 @@ class SubscriptionService:
             )
             return None
 
-        panel_user_id, panel_sub_link_id, panel_short_uuid, panel_user_created_now = (
-            await self._get_or_create_panel_user_link_details(session, user_id, db_user)
-        )
+        panel_link = await self._ensure_panel_user(session, user_id, db_user)
+        panel_user_id, panel_sub_link_id, panel_short_uuid, panel_user_created_now = panel_link[:4]
 
         if not panel_user_id or not panel_sub_link_id:
             logging.error(
@@ -580,13 +670,11 @@ class SubscriptionService:
         current_active_sub = await subscription_dal.get_active_subscription_by_user_id(
             session, user_id, panel_user_id
         )
-        start_date = datetime.now(timezone.utc)
-        if (
-            current_active_sub
-            and current_active_sub.end_date
-            and current_active_sub.end_date > start_date
-        ):
-            start_date = current_active_sub.end_date
+        start_date = self._extension_base_for(
+            user_id,
+            panel_link,
+            current_active_sub.end_date if current_active_sub else None,
+        )
 
         # base duration by months
         end_after_months = add_months(start_date, months_int)
@@ -733,9 +821,8 @@ class SubscriptionService:
             )
             return None
 
-        panel_id, panel_sub_uuid, _, _ = await self._get_or_create_panel_user_link_details(
-            session, user_id, user
-        )
+        panel_link = await self._ensure_panel_user(session, user_id, user)
+        panel_id, panel_sub_uuid = panel_link.panel_user_id, panel_link.panel_sub_link_id
         if not panel_id or not panel_sub_uuid:
             logging.error(
                 f"Failed to ensure panel user for subscription extension of user {user_id}."
@@ -750,7 +837,10 @@ class SubscriptionService:
                 f"No active subscription found for user {user_id}. Creating new one for {bonus_days} days."
             )
             start_date = datetime.now(timezone.utc)
-            new_end_date_obj = start_date + timedelta(days=bonus_days)
+            new_end_date_obj = (
+                self._extension_base_for(user_id, panel_link, None)
+                + timedelta(days=bonus_days)
+            )
 
             # Apply main traffic limit for admin/referral/promo bonuses, fallback to trial limit otherwise
             traffic_limit = (
@@ -778,10 +868,8 @@ class SubscriptionService:
                 session, bonus_sub_payload
             )
         else:
-            current_end_date = active_sub.end_date
-            now_utc = datetime.now(timezone.utc)
-            start_point_for_bonus = (
-                current_end_date if current_end_date > now_utc else now_utc
+            start_point_for_bonus = self._extension_base_for(
+                user_id, panel_link, active_sub.end_date
             )
             new_end_date_obj = start_point_for_bonus + timedelta(days=bonus_days)
 
