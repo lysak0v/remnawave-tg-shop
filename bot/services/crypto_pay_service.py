@@ -10,6 +10,7 @@ from aiocryptopay import AioCryptoPay, Networks
 from aiocryptopay.models.update import Update
 
 from config.settings import Settings
+from bot.utils.subscription_view import days_text
 from bot.middlewares.i18n import JsonI18n
 from bot.services.subscription_service import SubscriptionService
 from bot.services.referral_service import ReferralService
@@ -331,7 +332,7 @@ class CryptoPayService:
                 text = _("payment_successful_with_referral_bonus_full",
                          months=int(months),
                          base_end_date=activation["end_date"].strftime('%Y-%m-%d'),
-                         bonus_days=applied_days,
+                         bonus_days=days_text(applied_days, _),
                          final_end_date=final_end.strftime('%Y-%m-%d'),
                          inviter_name=inviter_name_display,
                          config_link=config_link_text)

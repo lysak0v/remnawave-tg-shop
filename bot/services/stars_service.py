@@ -10,6 +10,7 @@ from config.settings import Settings
 from db.dal import payment_dal, user_dal
 from .subscription_service import SubscriptionService
 from .referral_service import ReferralService
+from bot.utils.subscription_view import days_text
 from bot.middlewares.i18n import JsonI18n
 from .notification_service import NotificationService
 from bot.keyboards.inline.user_keyboards import get_connect_and_main_keyboard
@@ -243,7 +244,7 @@ class StarsService:
                 "payment_successful_with_referral_bonus_full",
                 months=months,
                 base_end_date=activation_details["end_date"].strftime('%Y-%m-%d'),
-                bonus_days=applied_days,
+                bonus_days=days_text(applied_days, _),
                 final_end_date=final_end.strftime('%Y-%m-%d'),
                 inviter_name=inviter_name_display,
                 config_link=config_link_text,

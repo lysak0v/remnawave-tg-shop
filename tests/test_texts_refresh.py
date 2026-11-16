@@ -123,3 +123,43 @@ def test_friend_message(i18n):
     assert "до +30 дней в подарок 👇" in text
     assert text.endswith(LINK)
     assert_fits(text)
+
+
+SUB_LINK = "https://sub.074740.xyz/byxA4enWg9Ms9Ufp"
+
+
+@pytest.mark.parametrize("days, ru", [(1, "1 день"), (3, "3 дня"), (7, "7 дней"), (21, "21 день"), (30, "30 дней")])
+def test_days_text(i18n, days, ru):
+    assert sv.days_text(days, texts(i18n)) == ru
+
+
+def test_payment_success_text_ru(i18n):
+    assert i18n.gettext("ru", "payment_successful_full", months=1, end_date="18.03.2027", config_link=SUB_LINK) == (
+        "✅ Оплата прошла — спасибо!\n\n📅 Подписка на 1 мес. активна\nдо <b>18.03.2027</b>\n\n"
+        f"🔗 Ссылка на подписку:\n<pre>{SUB_LINK}</pre>\n\n"
+        "Уже подключены? Ничего делать\nне нужно — VPN уже работает.\nНовое устройство — нажмите\n«🔗 Подключиться» 👇"
+    )
+
+
+@pytest.mark.parametrize("lang", ["ru", "en"])
+def test_payment_success_variants_fit(i18n, lang):
+    get_text = texts(i18n, lang)
+    bonus = sv.days_text(30, get_text)
+    common = dict(months=12, config_link=SUB_LINK)
+    variants = [
+        get_text("payment_successful_full", end_date="18.03.2027", **common),
+        get_text("payment_successful_with_referral_bonus_full", base_end_date="18.03.2027",
+                 final_end_date="17.04.2027", bonus_days=bonus, inviter_name="Александр", **common),
+        get_text("payment_successful_with_promo_full", end_date="17.04.2027", bonus_days=bonus, **common),
+    ]
+    for text in variants:
+        assert "{" not in text
+        assert_fits(text)
+    assert f"🎁 +{bonus}" in variants[1] and f"🎁 +{bonus}" in variants[2]
+
+
+def test_payment_date_format():
+    from bot.handlers.user.payment import _user_date
+    moment = datetime(2027, 3, 18, 12, 0, tzinfo=timezone.utc)
+    assert _user_date(moment, "ru") == "18.03.2027"
+    assert _user_date(moment, "en") == "Mar 18, 2027"
