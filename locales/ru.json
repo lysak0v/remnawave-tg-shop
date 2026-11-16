@@ -599,5 +599,20 @@
   "no_bonus_placeholder": "нет",
   "payment_successful_with_promo_full": "✅ Оплата прошла — спасибо!\n\n📅 Подписка на {months} мес. активна\nдо <b>{end_date}</b>\n🎁 +{bonus_days} по промокоду\n\n🔗 Ссылка на подписку:\n<pre>{config_link}</pre>\n\nУже подключены? Ничего делать\nне нужно — VPN уже работает.\nНовое устройство — нажмите\n«🔗 Подключиться» 👇",
   "system_or_unknown_user": "Система/неизвестный пользователь",
-  "free_kassa_order_full": "Заказ №{order_id} от {date}\n\n"
+  "free_kassa_order_full": "Заказ №{order_id} от {date}\n\n",
+  "receipt_alert": "🧾 <b>Чеки не уходят в «Мой налог»</b>\n\nНе отправлено: <b>{count}</b> на <b>{amount}</b>\nСамый ранний: {oldest}\n\nПоследняя ошибка:\n<code>{error}</code>\n\nБот повторяет попытки сам.\nСписок — /receipts",
+  "receipt_alert_deadline": "⏰ Есть чеки за прошлый месяц —\nих нужно сформировать до {day}-го",
+  "receipt_alert_overdue": "❗ Срок для чеков прошлого месяца\n({day}-е число) прошёл — проверьте\nи при необходимости пробейте вручную",
+  "receipt_recovered": "✅ <b>Чеки ушли в «Мой налог»</b>\n\nОтправлено после сбоя: <b>{count}</b>",
+  "receipt_recovered_left": "\nЕщё ждут отправки: <b>{count}</b>",
+  "receipt_refund_unsent": "↩️ Возврат по платежу #{payment_id} ({amount}).\nЧек ещё не был отправлен —\nотправлять его не будем.",
+  "receipt_refund_sent": "↩️ <b>Возврат по платежу #{payment_id}</b> ({amount})\n\nЧек уже в «Мой налог» —\nаннулируйте его вручную:\n<code>{receipt_uuid}</code>",
+  "receipts_none": "✅ Все чеки отправлены в «Мой налог».",
+  "receipts_list_header": "🧾 <b>Не отправлено чеков: {count}</b>",
+  "receipts_list_item": "#{payment_id} · {amount} · оплата {paid_at}\nпопыток: {attempts}, следующая: {next_at}",
+  "receipts_list_more": "…и ещё {count}",
+  "receipts_list_error": "Последняя ошибка:\n<code>{error}</code>",
+  "receipts_next_now": "сейчас",
+  "receipts_retry_button": "🔁 Повторить сейчас",
+  "receipts_retry_started": "Повторяю отправку чеков…"
 }

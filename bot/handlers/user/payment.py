@@ -13,12 +13,14 @@ from yookassa.domain.models.amount import Amount as YooKassaAmount
 
 from db.dal import payment_dal, user_dal, user_billing_dal
 
+from bot.utils.device_display import parse_panel_time
 from bot.utils.subscription_view import days_text, format_date, utc_now_local
 from bot.services.subscription_service import SubscriptionService
 from bot.services.referral_service import ReferralService
 from bot.services.panel_api_service import PanelApiService
 from bot.services.yookassa_service import YooKassaService
 from bot.services.lknpd_service import LknpdService
+from bot.services.receipt_service import ReceiptService
 from bot.middlewares.i18n import JsonI18n
 from config.settings import Settings
 from bot.services.notification_service import NotificationService
@@ -29,7 +31,14 @@ from bot.utils.config_link import prepare_config_links
 YOOKASSA_EVENT_PAYMENT_SUCCEEDED = 'payment.succeeded'
 YOOKASSA_EVENT_PAYMENT_CANCELED = 'payment.canceled'
 YOOKASSA_EVENT_PAYMENT_WAITING_FOR_CAPTURE = 'payment.waiting_for_capture'
+YOOKASSA_EVENT_REFUND_SUCCEEDED = 'refund.succeeded'
 
+
+
+def _paid_at(payment_info: dict) -> datetime:
+    """When YooKassa captured the money (the receipt's operation time), else now."""
+    captured = parse_panel_time(payment_info.get("captured_at"))
+    return captured or datetime.now(timezone.utc)
 
 
 def _user_date(moment, lang: str) -> str:
@@ -411,18 +420,12 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
                     receipt_item_name = settings.LKNPD_RECEIPT_NAME_TRAFFIC.format(gb=traffic_label)
                 else:
                     receipt_item_name = settings.LKNPD_RECEIPT_NAME_SUBSCRIPTION.format(months=int(subscription_months))
-            try:
-                await lknpd_service.create_income_receipt(
-                    item_name=receipt_item_name,
-                    amount=payment_value,
-                    quantity=1.0,
-                    operation_time=datetime.now(timezone.utc),
-                )
-            except Exception:
-                logging.exception(
-                    "Failed to send LKNPD receipt for payment %s",
-                    yk_payment_id_from_hook,
-                )
+            # Sent by the receipt worker right after commit and retried while LKNPD is down.
+            await payment_dal.mark_receipt_pending(
+                session, payment_db_id, item_name=receipt_item_name,
+                paid_at=_paid_at(payment_info_from_webhook),
+            )
+
         config_link_display, connect_button_url = await prepare_config_links(
             settings, activation_details.get("subscription_url") if activation_details else None
         )
@@ -591,6 +594,22 @@ async def process_cancelled_payment(session: AsyncSession, bot: Bot,
         raise
 
 
+async def _handle_refund_notification(refund_obj, yookassa_service, receipt_service, async_session_factory):
+    """A refund drops an unsent receipt or asks the admin to cancel a sent one.
+
+    The notification is not trusted as is: the refund is looked up in the YooKassa API.
+    """
+    refund_id = str(getattr(refund_obj, "id", "") or "")
+    refund = await yookassa_service.get_refund_info(refund_id) if yookassa_service else None
+    if not refund or refund.get("status") != "succeeded" or not refund.get("payment_id"):
+        logging.warning("YooKassa refund %s not confirmed by the API; ignored", refund_id)
+        return web.Response(status=200, text="refund_unconfirmed")
+    if receipt_service:
+        async with async_session_factory() as session:
+            await receipt_service.handle_refund(session, refund["payment_id"])
+    return web.Response(status=200, text="ok")
+
+
 async def yookassa_webhook_route(request: web.Request):
 
     try:
@@ -603,6 +622,7 @@ async def yookassa_webhook_route(request: web.Request):
             'subscription_service']
         referral_service: ReferralService = request.app['referral_service']
         lknpd_service: Optional[LknpdService] = request.app.get('lknpd_service')
+        receipt_service: Optional[ReceiptService] = request.app.get('receipt_service')
         async_session_factory: sessionmaker = request.app[
             'async_session_factory']
     except KeyError as e_app_ctx:
@@ -623,6 +643,10 @@ async def yookassa_webhook_route(request: web.Request):
             f"YooKassa Webhook Parsed: Event='{notification_object.event}', "
             f"PaymentId='{payment_data_from_notification.id}', Status='{payment_data_from_notification.status}'"
         )
+
+        if notification_object.event == YOOKASSA_EVENT_REFUND_SUCCEEDED:
+            return await _handle_refund_notification(
+                payment_data_from_notification, yookassa_service, receipt_service, async_session_factory)
 
         if not payment_data_from_notification or not hasattr(
                 payment_data_from_notification,
@@ -683,6 +707,8 @@ async def yookassa_webhook_route(request: web.Request):
             str(payment_data_from_notification.description)
             if payment_data_from_notification.description else None,
             "payment_method": pm_dict,
+            "captured_at": str(payment_data_from_notification.captured_at)
+            if getattr(payment_data_from_notification, "captured_at", None) else None,
         }
 
         async with async_session_factory() as session:
@@ -789,6 +815,8 @@ async def yookassa_webhook_route(request: web.Request):
                             )
                             return web.Response(status=503, text="yookassa_processing_failed_retry")
                         await session.commit()
+                        if receipt_service:
+                            receipt_service.kick()
                     else:
                         logging.warning(
                             f"Payment Succeeded event for {payment_dict_for_processing.get('id')} "

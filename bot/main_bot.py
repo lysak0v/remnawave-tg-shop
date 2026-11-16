@@ -299,6 +299,10 @@ async def run_bot(settings_param: Settings):
 
     # Recurring billing moved to panel webhook (24h before expiry). No periodic task needed here.
 
+    receipt_service = services.get("receipt_service")
+    if receipt_service and receipt_service.enabled:
+        main_tasks.append(asyncio.create_task(receipt_service.run(), name="ReceiptWorkerTask"))
+
     logging.info("Starting bot in Webhook mode with AIOHTTP server...")
     logging.info(f"Starting bot with main tasks: {[task.get_name() for task in main_tasks]}")
 

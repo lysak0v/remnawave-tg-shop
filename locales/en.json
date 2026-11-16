@@ -599,5 +599,20 @@
   "no_bonus_placeholder": "none",
   "payment_successful_with_promo_full": "✅ Payment received — thank you!\n\n📅 Your {months}-month plan\nis active until <b>{end_date}</b>\n🎁 +{bonus_days} with your promo code\n\n🔗 Subscription link:\n<pre>{config_link}</pre>\n\nAlready connected? Nothing to do —\nyour VPN keeps working.\nNew device? Tap «🔗 Connect» 👇",
   "system_or_unknown_user": "System/unknown user",
-  "free_kassa_order_full": "Order #{order_id} from {date}\n\n"
+  "free_kassa_order_full": "Order #{order_id} from {date}\n\n",
+  "receipt_alert": "🧾 <b>Receipts are not reaching «Мой налог»</b>\n\nNot sent: <b>{count}</b> for <b>{amount}</b>\nEarliest: {oldest}\n\nLast error:\n<code>{error}</code>\n\nThe bot keeps retrying.\nList — /receipts",
+  "receipt_alert_deadline": "⏰ Some receipts are from last month —\nthey are due by the {day}th",
+  "receipt_alert_overdue": "❗ The deadline for last month's\nreceipts (the {day}th) has passed —\ncheck and issue them by hand if needed",
+  "receipt_recovered": "✅ <b>Receipts reached «Мой налог»</b>\n\nSent after the outage: <b>{count}</b>",
+  "receipt_recovered_left": "\nStill waiting: <b>{count}</b>",
+  "receipt_refund_unsent": "↩️ Refund for payment #{payment_id} ({amount}).\nThe receipt was not sent yet —\nit will not be sent.",
+  "receipt_refund_sent": "↩️ <b>Refund for payment #{payment_id}</b> ({amount})\n\nThe receipt is already in «Мой налог» —\ncancel it by hand:\n<code>{receipt_uuid}</code>",
+  "receipts_none": "✅ All receipts are in «Мой налог».",
+  "receipts_list_header": "🧾 <b>Receipts not sent: {count}</b>",
+  "receipts_list_item": "#{payment_id} · {amount} · paid {paid_at}\nattempts: {attempts}, next: {next_at}",
+  "receipts_list_more": "…and {count} more",
+  "receipts_list_error": "Last error:\n<code>{error}</code>",
+  "receipts_next_now": "now",
+  "receipts_retry_button": "🔁 Retry now",
+  "receipts_retry_started": "Retrying the receipts…"
 }

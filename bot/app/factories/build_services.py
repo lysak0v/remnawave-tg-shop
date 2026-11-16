@@ -16,6 +16,8 @@ from bot.services.freekassa_service import FreeKassaService
 from bot.services.platega_service import PlategaService
 from bot.services.severpay_service import SeverPayService
 from bot.services.lknpd_service import LknpdService
+from bot.services.notification_service import NotificationService
+from bot.services.receipt_service import ReceiptService
 
 
 def build_core_services(
@@ -80,6 +82,14 @@ def build_core_services(
         api_url=settings.LKNPD_API_URL,
         timezone_name=settings.LKNPD_TIMEZONE,
     )
+    receipt_notifier = NotificationService(bot, settings, i18n)
+    receipt_service = ReceiptService(
+        settings,
+        lknpd_service,
+        async_session_factory,
+        notify=lambda text: receipt_notifier.send_custom_notification(text, to_log_channel=True),
+        get_text=lambda key, **kw: i18n.gettext(settings.DEFAULT_LANGUAGE, key, **kw),
+    )
 
     # Wire services that depend on each other
     try:
@@ -103,6 +113,7 @@ def build_core_services(
         "panel_webhook_service": panel_webhook_service,
         "yookassa_service": yookassa_service,
         "lknpd_service": lknpd_service,
+        "receipt_service": receipt_service,
         "platega_service": platega_service,
         "severpay_service": severpay_service,
     }
