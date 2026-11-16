@@ -58,10 +58,11 @@ async def request_trial_confirmation_handler(
         return
 
     if await subscription_service.has_had_any_subscription(session, user_id):
+        renew = await subscription_service.has_running_paid_subscription(session, user_id)
         await callback.message.edit_text(
             _("trial_already_had_subscription_or_trial"),
             reply_markup=get_main_menu_inline_keyboard(
-                current_lang, i18n, settings, False
+                current_lang, i18n, settings, False, renew=renew
             ),
         )
         try:

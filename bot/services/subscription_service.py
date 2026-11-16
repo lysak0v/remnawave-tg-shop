@@ -177,6 +177,21 @@ class SubscriptionService:
             logging.exception(f"Failed to check active subscription for user {user_id}")
             return False
 
+    async def has_running_paid_subscription(self, session: AsyncSession, user_id: int) -> bool:
+        """True when a paid subscription still runs in the panel, so renewal is offered.
+
+        A trial (TRIAL_USER_TAG) is not renewed but bought; an unreachable panel -> False.
+        """
+        try:
+            _, panel_user = await self.find_panel_user(session, user_id)
+        except Exception:
+            logging.exception(f"Failed to check paid subscription for user {user_id}")
+            return False
+        if not panel_user_is_active(panel_user, datetime.now(timezone.utc)):
+            return False
+        trial_tag = self.settings.TRIAL_USER_TAG
+        return not (trial_tag and panel_user.get("tag") == trial_tag)
+
     async def is_disabled_in_panel(self, session: AsyncSession, user_id: int) -> bool:
         """True only when the panel confirms the user is DISABLED (unreachable panel -> False)."""
         _, panel_user = await self.find_panel_user(session, user_id)
@@ -1118,6 +1133,8 @@ class SubscriptionService:
             "user_bot_username": db_user.username,
             "is_panel_data": True,
             "max_devices": hwid_limit,
+            "tag": panel_user_data.get("tag"),
+            "online_at": (panel_user_data.get("userTraffic") or {}).get("onlineAt"),
         }
 
     async def get_subscriptions_ending_soon(
