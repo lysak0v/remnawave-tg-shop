@@ -13,12 +13,15 @@ from config.settings import Settings
 
 class JsonI18n:
 
-    def __init__(self, path: str, default: str = "en", domain: str = "bot"):
+    def __init__(self, path: str, default: str = "en", domain: str = "bot",
+                 overrides_path: Optional[str] = None):
         self.domain = domain
         self.path = path
+        self.overrides_path = overrides_path
         self.default_lang = default
         self.locales_data: Dict[str, Dict[str, str]] = {}
         self._load_locales()
+        self._apply_overrides()
         logging.info(
             f"JsonI18n initialized. Loaded languages: {list(self.locales_data.keys())}. Default: {self.default_lang}"
         )
@@ -43,6 +46,37 @@ class JsonI18n:
                     logging.error(
                         f"Error loading locale {lang_code} from {file_path}: {e_load}",
                         exc_info=True)
+
+    def _apply_overrides(self):
+        """Replace texts from <overrides_path>/<lang>.json on top of the bundled locales.
+
+        Operators keep only the keys they changed there, so new keys of a bot update
+        come from the image instead of a stale full copy.
+        """
+        if not self.overrides_path or not os.path.isdir(self.overrides_path):
+            return
+        for item in sorted(os.listdir(self.overrides_path)):
+            if not item.endswith(".json"):
+                continue
+            lang_code = item.split(".")[0]
+            file_path = os.path.join(self.overrides_path, item)
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    overrides = json.load(f)
+            except Exception as e_load:
+                logging.error(f"Error loading locale overrides {file_path}: {e_load}")
+                continue
+            if not isinstance(overrides, dict):
+                logging.error(f"Locale overrides {file_path} must be a JSON object; ignored.")
+                continue
+            base = self.locales_data.setdefault(lang_code, {})
+            unknown = sorted(key for key in overrides if key not in base)
+            if unknown:
+                logging.warning(
+                    f"Locale overrides {file_path}: keys not in the bundled locale (typo?): {unknown}"
+                )
+            base.update(overrides)
+            logging.info(f"Applied {len(overrides)} locale overrides for '{lang_code}' from {file_path}")
 
     def gettext(self, lang_code: Optional[str], key: str, **kwargs) -> str:
         # Determine effective language with robust fallback
@@ -102,7 +136,8 @@ _i18n_instance_singleton: Optional[JsonI18n] = None
 
 def get_i18n_instance(path: str = "locales",
                       default: str = "en",
-                      domain: str = "bot") -> JsonI18n:
+                      domain: str = "bot",
+                      overrides_path: Optional[str] = None) -> JsonI18n:
     global _i18n_instance_singleton
     if _i18n_instance_singleton is None:
 
@@ -111,13 +146,10 @@ def get_i18n_instance(path: str = "locales",
                 f"CRITICAL: Locales directory '{path}' not found. i18n will not work correctly."
             )
 
-            _i18n_instance_singleton = JsonI18n(path=path,
-                                                default=default,
-                                                domain=domain)
-        else:
-            _i18n_instance_singleton = JsonI18n(path=path,
-                                                default=default,
-                                                domain=domain)
+        _i18n_instance_singleton = JsonI18n(path=path,
+                                            default=default,
+                                            domain=domain,
+                                            overrides_path=overrides_path)
     return _i18n_instance_singleton
 
 
