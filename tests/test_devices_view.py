@@ -17,6 +17,8 @@ from bot.utils.device_display import (
     device_name,
     device_os,
     hwid_tails,
+    mask_hwid,
+    plural_form,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -66,8 +68,8 @@ def test_device_without_any_name_uses_fallback():
 
 
 def test_hwid_tails_are_unique_and_grow_on_clash():
-    tails = hwid_tails(["aaaa1111zzzz9999", "bbbb2222yyyy9999", "cccc3333xxxx1234"])
-    assert tails == {"aaaa1111zzzz9999": "z9999", "bbbb2222yyyy9999": "y9999", "cccc3333xxxx1234": "1234"}
+    tails = hwid_tails(["aaaa1111zz09999", "bbbb2222yy09999", "cccc3333xxxx12345"])
+    assert tails == {"aaaa1111zz09999": "z09999", "bbbb2222yy09999": "y09999", "cccc3333xxxx12345": "12345"}
 
 
 @pytest.fixture
@@ -85,11 +87,12 @@ def test_identical_devices_are_told_apart(get_text):
     assert "Мои устройства (2/3)" in text
     assert "<b>1. 📱 iPhone 15 Pro</b>\niOS 18.5 · Happ 6.1.0\nПодключено: 12.10.2026" in text
     assert "Подключено: 03.11.2026" in text
-    # full HWID stays in the list, none of the raw technical fields
-    assert "<code>0f9e8d7c6b5a7f3a</code>" in text and "<code>1a2b3c4d5e6f9c21</code>" in text
+    # HWID is shortened to fit one line on a phone; the user agent is not shown
+    assert "<code>0f9e8*****a7f3a</code>" in text and "<code>1a2b3*****f9c21</code>" in text
     assert "User Agent" not in text
     buttons = [row[0] for row in rows]
-    assert [b.text for b in buttons] == ["✖️ 1. iPhone 15 Pro · …7f3a", "✖️ 2. iPhone 15 Pro · …9c21"]
+    # the button ends with the same 5 characters as the HWID line
+    assert [b.text for b in buttons] == ["✖️ 1. iPhone 15 Pro · …a7f3a", "✖️ 2. iPhone 15 Pro · …f9c21"]
     assert buttons[0].callback_data == f"disconnect_device:{_hwid_callback_token('0f9e8d7c6b5a7f3a')}"
     assert all(len(b.callback_data.encode()) <= 64 for b in buttons)
 
@@ -98,7 +101,7 @@ def test_long_name_is_shortened_in_button_only(get_text):
     device = _dev("OpenWrt Linux", "Xiaomi Redmi Router AX6000 (OpenWrt U-Boot layout)", "6.12", "sing-box")
     text, rows = build_devices_view([device], get_text, "3")
     assert "Xiaomi Redmi Router AX6000 (OpenWrt U-Boot layout)" in text
-    assert rows[0][0].text == "✖️ 1. Xiaomi Redmi Router AX6… · …0708"  # 24 chars incl. "…"
+    assert rows[0][0].text == "✖️ 1. Xiaomi Redmi Router AX6… · …60708"  # 24 chars incl. "…"
 
 
 def test_names_are_html_escaped(get_text):
@@ -115,7 +118,7 @@ def test_confirmation_screen(get_text):
     device = _dev("iOS", "iPhone 15 Pro", "18.5", "Happ/6.1.0/ios", hwid="0f9e8d7c6b5a7f3a")
     text, markup = build_disconnect_confirmation(device, get_text)
     assert text.startswith("Отключить это устройство?")
-    assert "<code>0f9e8d7c6b5a7f3a</code>" in text
+    assert "<code>0f9e8*****a7f3a</code>" in text
     yes, no = markup.inline_keyboard[0][0], markup.inline_keyboard[1][0]
     assert yes.callback_data == f"disconnect_device_do:{_hwid_callback_token('0f9e8d7c6b5a7f3a')}"
     assert no.callback_data == "main_action:my_devices"
@@ -136,12 +139,14 @@ def _seen(updated, hwid="0f9e8d7c6b5a7f3a"):
 @pytest.mark.parametrize(
     "updated, line",
     [
-        ("2026-11-16T11:45:00.000Z", "Последний запрос: 16.11.2026 14:45 (сегодня)\n"),
+        ("2026-11-16T11:45:00.000Z", "Последний запрос: сегодня\n"),
         # 23:30 UTC on the 15th is already the 16th in Moscow
-        ("2026-11-15T23:30:00.000Z", "Последний запрос: 16.11.2026 02:30 (сегодня)\n"),
-        ("2026-11-15T08:00:00.000Z", "Последний запрос: 15.11.2026 11:00 (вчера)\n"),
-        ("2026-11-07T08:00:00.000Z", "Последний запрос: 07.11.2026 11:00 (9 дн. назад)\n"),
-        ("2026-10-07T16:21:00.000Z", "Последний запрос: 07.10.2026 19:21 (40 дн. назад) 💤\n"),
+        ("2026-11-15T23:30:00.000Z", "Последний запрос: сегодня\n"),
+        ("2026-11-15T08:00:00.000Z", "Последний запрос: вчера\n"),
+        ("2026-11-14T08:00:00.000Z", "Последний запрос: 2 дня назад\n"),
+        ("2026-11-07T08:00:00.000Z", "Последний запрос: 9 дней назад\n"),
+        ("2026-10-26T08:00:00.000Z", "Последний запрос: 21 день назад\n"),
+        ("2026-10-07T16:21:00.000Z", "Последний запрос: 40 дней назад 💤\n"),
     ],
 )
 def test_last_request_line(get_text, updated, line):
@@ -155,21 +160,53 @@ def test_idle_note_only_when_an_idle_device_exists(get_text):
     stale, _ = build_devices_view(
         [_seen("2026-11-16T11:45:00Z", "aaaa1111"), _seen("2026-10-07T16:21:00Z", "bbbb2222")],
         get_text, "3", now=NOW)
-    assert "💤 — устройство не запрашивало подписку больше 30 дн." in stale
+    assert "💤 — устройство не запрашивало подписку больше 30 дней" in stale
     assert stale.count("💤") == 2  # the mark on the idle device and the note
 
 
 def test_exactly_30_days_is_not_idle_yet(get_text):
     text, _ = build_devices_view([_seen("2026-10-17T09:00:00Z")], get_text, "3", now=NOW)
-    assert "(30 дн. назад)" in text and "💤" not in text
+    assert "Последний запрос: 30 дней назад\n" in text and "💤" not in text
 
 
 def test_missing_update_time_falls_back_to_connection_time(get_text):
     device = _seen(None)
     text, _ = build_devices_view([device], get_text, "3", now=NOW)
-    assert "Последний запрос: 20.07.2026 19:23 (119 дн. назад) 💤" in text
+    assert "Последний запрос: 119 дней назад 💤" in text
 
 
 def test_confirmation_shows_last_request(get_text):
     text, _ = build_disconnect_confirmation(_seen("2026-10-07T16:21:00Z"), get_text, now=NOW)
-    assert "Последний запрос: 07.10.2026 19:21 (40 дн. назад) 💤" in text
+    assert "Последний запрос: 40 дней назад 💤" in text
+
+
+@pytest.mark.parametrize(
+    "number, form",
+    [(1, "one"), (21, "one"), (101, "one"), (2, "few"), (4, "few"), (22, "few"),
+     (5, "many"), (11, "many"), (12, "many"), (14, "many"), (20, "many"), (111, "many")],
+)
+def test_plural_form(number, form):
+    assert plural_form(number) == form
+
+
+@pytest.mark.parametrize(
+    "hwid, masked",
+    [
+        ("A0B1C2D3-E4F5-4A6B-8C7D-9E0F1A2F88B6", "A0B1C*****F88B6"),
+        ("0f9e8d7c6b5a7f3a", "0f9e8*****a7f3a"),
+        ("short12345", "short12345"),  # fits anyway
+        (None, "-"),
+    ],
+)
+def test_mask_hwid(hwid, masked):
+    assert mask_hwid(hwid) == masked
+
+
+def test_english_last_request(get_text):
+    i18n = JsonI18n(str(ROOT / "locales"), default="en")
+    en = lambda key, **kw: i18n.gettext("en", key, **kw)  # noqa: E731
+    text, _ = build_devices_view([_seen("2026-11-15T08:00:00Z"), _seen("2026-11-15T08:00:00Z", "x")], en, "3",
+                                 now=NOW)
+    assert "Last request: yesterday" in text
+    one, _ = build_devices_view([_seen("2026-11-15T09:00:00Z")], en, "3", now=datetime(2026, 11, 17, 12, tzinfo=MSK))
+    assert "Last request: 2 days ago" in one
