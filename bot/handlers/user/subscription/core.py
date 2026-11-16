@@ -31,6 +31,7 @@ from bot.utils.device_display import (
     plural_form,
     short_hwid,
 )
+from bot.utils.money import RUB_SIGN
 from db.dal import subscription_dal, user_billing_dal
 from db.models import Subscription
 
@@ -195,7 +196,7 @@ async def display_subscription_options(
     if await refuse_if_disabled_in_panel(event, subscription_service, session, get_text):
         return
 
-    currency_symbol_val = "RUB"
+    currency_symbol_val = RUB_SIGN
     traffic_packages = getattr(settings, "traffic_packages", {}) or {}
     stars_traffic_packages = getattr(settings, "stars_traffic_packages", {}) or {}
     traffic_mode = bool(getattr(settings, "traffic_sale_mode", False) or stars_traffic_packages)

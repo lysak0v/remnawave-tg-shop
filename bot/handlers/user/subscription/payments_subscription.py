@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.handlers.user.subscription.core import refuse_if_disabled_in_panel
 from bot.keyboards.inline.user_keyboards import get_payment_method_keyboard
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.money import RUB_SIGN, format_amount
 from config.settings import Settings
 
 router = Router(name="user_subscription_payments_selection_router")
@@ -84,7 +85,7 @@ async def select_subscription_period_callback_handler(
 
     price_rub = price_source.get(months)
     stars_price = stars_price_source.get(months)
-    currency_symbol_val = "RUB"
+    currency_symbol_val = RUB_SIGN
 
     # Check for active discount and apply if exists
     discount_text = ""
@@ -104,9 +105,9 @@ async def select_subscription_period_callback_handler(
                     "active_discount_notice",
                     code=promo_code,
                     discount_pct=discount_pct,
-                    original_price=original_price_rub,
-                    discounted_price=price_rub,
-                    discount_amount=discount_amt,
+                    original_price=format_amount(original_price_rub),
+                    discounted_price=format_amount(price_rub),
+                    discount_amount=format_amount(discount_amt),
                     currency_symbol=currency_symbol_val,
                 )
             if stars_price is not None:
@@ -122,9 +123,9 @@ async def select_subscription_period_callback_handler(
                         "active_discount_notice",
                         code=promo_code,
                         discount_pct=discount_pct,
-                        original_price=original_stars_price,
-                        discounted_price=discounted_stars_price,
-                        discount_amount=discount_amt,
+                        original_price=format_amount(original_stars_price),
+                        discounted_price=format_amount(discounted_stars_price),
+                        discount_amount=format_amount(discount_amt),
                         currency_symbol="⭐",
                     )
 
