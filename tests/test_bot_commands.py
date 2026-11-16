@@ -18,15 +18,16 @@ def i18n():
 def test_menu_texts_per_language(i18n):
     ru = {c.command: c.description for c in build_bot_commands(i18n, "ru")}
     en = {c.command: c.description for c in build_bot_commands(i18n, "en")}
-    assert list(ru) == ["start", "connect", "language"]
-    assert ru["connect"] == "Моя подписка и подключение"
-    assert en["connect"] == "My subscription and connection"
+    assert list(ru) == ["start", "subscription", "language"]
+    # one bilingual text, short enough for the menu
+    assert ru == en == {"start": "Меню / Menu", "subscription": "Подписка / Subscription",
+                        "language": "Язык / Language"}
 
 
 def test_custom_start_description(i18n):
     commands = build_bot_commands(i18n, "ru", start_description="Открыть магазин")
     assert commands[0].description == "Открыть магазин"
-    assert commands[1].description == "Моя подписка и подключение"
+    assert commands[1].description == "Подписка / Subscription"
 
 
 @pytest.mark.parametrize("lang", ["ru", "en"])
@@ -38,6 +39,8 @@ def test_menu_fits_telegram_limits(i18n, lang):
 
 
 def test_every_menu_command_has_a_handler():
+    # /connect stays as an alias of /subscription
+    assert 'Command("connect")' in "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "bot").rglob("*.py"))
     sources = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "bot").rglob("*.py"))
     for command, _ in MENU_COMMANDS:
         if command == "start":
@@ -69,8 +72,8 @@ async def test_setup_registers_default_and_each_language(i18n, settings, monkeyp
     # the custom /start text is for the default language (ru) only
     assert menus[None][0] == ("start", "Открыть магазин")
     assert menus["ru"][0] == ("start", "Открыть магазин")
-    assert menus["en"][0] == ("start", "Open the menu")
-    assert menus["en"][2] == ("language", "Change language / Язык")
+    assert menus["en"][0] == ("start", "Меню / Menu")
+    assert menus["en"][2] == ("language", "Язык / Language")
 
 
 async def test_setup_survives_a_failing_language(i18n, settings):
