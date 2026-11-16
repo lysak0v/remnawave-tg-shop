@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [3.6.0] — 2026-11-16
+
 Миграций БД нет, новых переменных нет. Новый ключ локали `subscribe_for_months_button_highlight`.
 
 ### Changed
