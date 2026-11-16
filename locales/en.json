@@ -493,6 +493,7 @@
   "my_sub_traffic_limited": "📊 Traffic: {used} of {limit}",
   "traffic_gb_value": "{value} GB",
   "my_sub_link_label": "🔗 Subscription link:",
+  "my_sub_link_value": "<pre>{link}</pre>",
   "my_sub_link_copy_hint": "👆 Tap to copy",
   "my_sub_expired": "⛔ Expired on <b>{date}</b>",
   "my_sub_trial_expired": "⛔ Trial ended on <b>{date}</b>",
