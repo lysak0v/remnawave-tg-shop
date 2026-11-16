@@ -744,7 +744,8 @@ async def main_action_callback_handler(
 
     if action == "subscribe":
         await user_subscription_handlers.display_subscription_options(
-            callback, i18n_data, settings, session, promo_code_service=promo_code_service)
+            callback, i18n_data, settings, session, promo_code_service=promo_code_service,
+            subscription_service=subscription_service)
     elif action == "my_subscription":
         await user_subscription_handlers.my_subscription_command_handler(
             callback, i18n_data, settings, panel_service, subscription_service,

@@ -113,8 +113,9 @@ class ReferralService:
                     )
                 else:
 
-                    inviter_panel_id, inviter_panel_sub_link_id, _, _ = await self.subscription_service._get_or_create_panel_user_link_details(
+                    inviter_panel_link = await self.subscription_service._ensure_panel_user(
                         session, inviter_user_id, inviter_user_model)
+                    inviter_panel_id, inviter_panel_sub_link_id = inviter_panel_link[:2]
 
                     if not inviter_panel_id:
                         logging.warning(
@@ -157,8 +158,11 @@ class ReferralService:
                             )
 
                             bonus_start_date = datetime.now(timezone.utc)
-                            bonus_end_date = bonus_start_date + timedelta(
-                                days=inviter_bonus_days)
+                            # Count from the panel expiry: the inviter may hold a subscription
+                            # the bot does not know about, and it must not be shortened.
+                            bonus_end_date = self.subscription_service._extension_base_for(
+                                inviter_user_id, inviter_panel_link, None
+                            ) + timedelta(days=inviter_bonus_days)
 
                             if not inviter_panel_sub_link_id:
                                 logging.error(
@@ -195,14 +199,12 @@ class ReferralService:
                                         session, bonus_sub_payload)
 
                                     panel_update_success = await self.subscription_service.panel_service.update_user_details_on_panel(
-                                        inviter_panel_id, {
-                                            "expireAt":
-                                            bonus_end_date.isoformat(
-                                                timespec='milliseconds').
-                                            replace('+00:00', 'Z'),
-                                            "status":
-                                            "ACTIVE",
-                                        })
+                                        inviter_panel_id,
+                                        self.subscription_service._build_panel_update_payload(
+                                            panel_user=inviter_panel_link.panel_user,
+                                            expire_at=bonus_end_date,
+                                            status="ACTIVE",
+                                        ))
                                     if panel_update_success:
                                         inviter_bonus_successfully_applied = True
                                         logging.info(
