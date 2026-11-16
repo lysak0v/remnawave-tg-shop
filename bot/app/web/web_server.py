@@ -24,6 +24,7 @@ async def build_and_start_web_app(
     for key in (
         "yookassa_service",
         "lknpd_service",
+        "receipt_service",
         "subscription_service",
         "referral_service",
         "panel_service",

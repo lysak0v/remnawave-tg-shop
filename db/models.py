@@ -120,6 +120,17 @@ class Payment(Base):
                         onupdate=func.now(),
                         nullable=True)
 
+    # «Мой налог» receipt: None — not required (other providers, older payments),
+    # "pending" — waits for (re)sending, "sent", "not_needed" — refunded before it was sent.
+    receipt_status = Column(String, nullable=True, index=True)
+    receipt_uuid = Column(String, nullable=True)
+    receipt_item_name = Column(String, nullable=True)
+    receipt_paid_at = Column(DateTime(timezone=True), nullable=True)
+    receipt_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    receipt_last_error = Column(String, nullable=True)
+    receipt_next_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    receipt_alerted_at = Column(DateTime(timezone=True), nullable=True)
+
     user = relationship("User", back_populates="payments")
     promo_code_used = relationship("PromoCode",
                                    back_populates="payments_where_used")
