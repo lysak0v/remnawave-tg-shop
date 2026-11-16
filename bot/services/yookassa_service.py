@@ -3,7 +3,7 @@ import logging
 import asyncio
 from typing import Optional, Dict, Any, List
 
-from yookassa import Configuration, Payment as YooKassaPayment
+from yookassa import Configuration, Payment as YooKassaPayment, Refund as YooKassaRefund
 from yookassa.domain.request.payment_request_builder import PaymentRequestBuilder
 from yookassa.domain.common.confirmation_type import ConfirmationType
 
@@ -212,6 +212,20 @@ class YooKassaService:
             logging.error(f"YooKassa payment creation failed: {e}",
                           exc_info=True)
             return None
+
+    async def get_refund_info(self, refund_id: str) -> Optional[Dict[str, Any]]:
+        """Refund as YooKassa reports it ({id, status, payment_id}); None if it cannot be confirmed."""
+        if not self.configured or not refund_id:
+            return None
+        try:
+            loop = asyncio.get_running_loop()
+            refund = await loop.run_in_executor(None, lambda: YooKassaRefund.find_one(refund_id))
+        except Exception:
+            logging.exception("Failed to fetch YooKassa refund %s", refund_id)
+            return None
+        if not refund:
+            return None
+        return {"id": refund.id, "status": refund.status, "payment_id": refund.payment_id}
 
     async def get_payment_info(
             self, payment_id_in_yookassa: str) -> Optional[Dict[str, Any]]:

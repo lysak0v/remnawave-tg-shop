@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from .lknpd_client import LknpdClient, PaymentType, LknpdApiError
+from .lknpd_client import LknpdApiError, LknpdAuthError, LknpdClient, PaymentType, stable_device_id
 
 
 class LknpdService:
@@ -19,27 +19,18 @@ class LknpdService:
         self.password = password
         self.configured = bool(self.inn and self.password)
         self._client = (
-            LknpdClient(base_url=api_url, timezone=ZoneInfo(timezone_name)) if self.configured else None
+            LknpdClient(base_url=api_url, timezone=ZoneInfo(timezone_name), device_id=stable_device_id(self.inn))
+            if self.configured else None
         )
         self._auth_lock = asyncio.Lock()
 
         if not self.configured:
             logging.warning("LKNPD credentials are missing. Receipt sending disabled.")
 
-    async def _ensure_authenticated(self) -> bool:
-        if not self._client:
-            return False
-
+    async def _ensure_authenticated(self) -> None:
         async with self._auth_lock:
-            if self._client.is_authenticated:
-                return True
-
-            try:
+            if not self._client.is_authenticated:
                 await self._client.authenticate(self.inn, self.password)
-                return True
-            except LknpdApiError:
-                logging.exception("LKNPD authentication failed.")
-                return False
 
     async def create_income_receipt(
         self,
@@ -49,11 +40,13 @@ class LknpdService:
         quantity: float = 1.0,
         operation_time: Optional[datetime] = None,
     ) -> Optional[str]:
-        if not self.configured:
-            return None
-        if not await self._ensure_authenticated():
-            return None
+        """Register the income in «Мой налог» and return the receipt UUID (None if the API gave none).
 
+        Raises LknpdApiError (with the API answer) on any failure, so the caller can retry later.
+        """
+        if not self.configured:
+            raise LknpdApiError("LKNPD credentials are not configured")
+        await self._ensure_authenticated()
         try:
             receipt_uuid = await self._client.create_income(
                 name=item_name,
@@ -62,12 +55,12 @@ class LknpdService:
                 payment_type=PaymentType.WIRE,
                 operation_time=operation_time,
             )
-            if not receipt_uuid:
-                logging.info("LKNPD receipt created without a UUID in response.")
-            return receipt_uuid
-        except LknpdApiError:
-            logging.exception("Failed to create LKNPD receipt.")
-            return None
+        except LknpdAuthError:
+            self._client._token_data = None  # log in again on the next attempt
+            raise
+        if not receipt_uuid:
+            logging.info("LKNPD receipt created without a UUID in response.")
+        return receipt_uuid
 
     async def close(self) -> None:
         return None

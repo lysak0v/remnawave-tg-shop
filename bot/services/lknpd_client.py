@@ -4,6 +4,7 @@ Custom implementation for lknpd.nalog.ru API.
 """
 
 import asyncio
+import hashlib
 import logging
 import uuid
 from datetime import UTC, datetime, tzinfo
@@ -44,6 +45,11 @@ class LknpdAuthError(LknpdApiError):
 class LknpdValidationError(LknpdApiError):
     """Validation error (400)."""
     pass
+
+
+def stable_device_id(seed: str) -> str:
+    """Same device ID for the same account across restarts, so LKNPD does not see a new device each time."""
+    return hashlib.sha256(f"lknpd-device:{seed}".encode()).hexdigest()[:21]
 
 
 def _generate_device_id() -> str:
@@ -94,11 +100,15 @@ class LknpdClient:
         base_url: str = "https://lknpd.nalog.ru/api",
         timeout: float = 10.0,
         timezone: tzinfo = UTC,
+        device_id: str | None = None,
+        auth_timeout: float = 60.0,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        # Login by INN and password has been taking 20-30 s on lknpd.nalog.ru.
+        self.auth_timeout = auth_timeout
         self.timezone = timezone
-        self.device_id = _generate_device_id()
+        self.device_id = device_id or _generate_device_id()
         self._token_data: dict[str, Any] | None = None
         self._refresh_lock = asyncio.Lock()
 
@@ -121,7 +131,7 @@ class LknpdClient:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.auth_timeout) as client:
                 response = await client.post(
                     f"{self.base_url}/v1/auth/lkfl",
                     json=request_data,

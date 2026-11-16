@@ -411,3 +411,64 @@ async def get_referral_revenue(session: AsyncSession, referrer_id: int) -> float
     result = await session.execute(stmt)
     total = result.scalar()
     return float(total or 0)
+
+
+# --- «Мой налог» receipts -----------------------------------------------------------
+
+RECEIPT_PENDING = "pending"
+RECEIPT_SENT = "sent"
+RECEIPT_NOT_NEEDED = "not_needed"
+
+
+async def mark_receipt_pending(session: AsyncSession, payment_db_id: int, *, item_name: str,
+                               paid_at, next_attempt_at=None) -> Optional[Payment]:
+    """Queue the receipt of a succeeded payment; the receipt worker sends it."""
+    payment = await session.get(Payment, payment_db_id)
+    if not payment:
+        logging.warning("Receipt: payment %s not found, nothing to queue", payment_db_id)
+        return None
+    if payment.receipt_status in (RECEIPT_SENT, RECEIPT_PENDING):
+        return payment
+    payment.receipt_status = RECEIPT_PENDING
+    payment.receipt_item_name = item_name
+    payment.receipt_paid_at = paid_at
+    payment.receipt_attempts = 0
+    payment.receipt_last_error = None
+    payment.receipt_next_attempt_at = next_attempt_at
+    await session.flush()
+    return payment
+
+
+async def get_due_receipts(session: AsyncSession, now, limit: int = 20) -> List[Payment]:
+    stmt = (
+        select(Payment)
+        .where(
+            Payment.receipt_status == RECEIPT_PENDING,
+            (Payment.receipt_next_attempt_at.is_(None)) | (Payment.receipt_next_attempt_at <= now),
+        )
+        .order_by(Payment.receipt_paid_at.asc().nulls_first(), Payment.payment_id.asc())
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def get_pending_receipts(session: AsyncSession) -> List[Payment]:
+    stmt = (
+        select(Payment)
+        .where(Payment.receipt_status == RECEIPT_PENDING)
+        .order_by(Payment.receipt_paid_at.asc().nulls_first(), Payment.payment_id.asc())
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def retry_pending_receipts_now(session: AsyncSession) -> int:
+    """Make every pending receipt due right away (admin «retry now»)."""
+    result = await session.execute(
+        update(Payment).where(Payment.receipt_status == RECEIPT_PENDING).values(receipt_next_attempt_at=None)
+    )
+    return result.rowcount or 0
+
+
+async def get_payment_by_yookassa_id(session: AsyncSession, yookassa_payment_id: str) -> Optional[Payment]:
+    stmt = select(Payment).where(Payment.yookassa_payment_id == yookassa_payment_id)
+    return (await session.execute(stmt)).scalar_one_or_none()
