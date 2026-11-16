@@ -83,7 +83,7 @@ def test_active_text_ru(i18n):
         "🟢 Онлайн: сейчас\n"
         "📊 Трафик: 0.32 ГБ (безлимит)\n\n"
         "🔗 Ссылка на подписку:\n"
-        f"<code>{LINK}</code>\n"
+        f"<pre>{LINK}</pre>\n"
         "👆 Нажмите, чтобы скопировать"
     )
 
@@ -131,7 +131,7 @@ def test_inactive_texts(i18n, d, expected):
     lines = render(i18n, d)[1].split("\n")
     for line in expected:
         assert line in lines
-    assert not any("<code>" in line for line in lines)
+    assert not any("<pre>" in line for line in lines)
 
 
 def _visible(line):
@@ -149,7 +149,7 @@ def test_lines_fit_phone_width(i18n, lang, d):
     if d:
         d = {**d, "online_at": online}
     for line in render(i18n, d, lang=lang)[1].split("\n"):
-        if line.startswith("<code>"):
+        if line.startswith("<pre>"):
             continue  # the link is copied, not read
         assert len(_visible(line)) <= MAX_LINE, line
 
