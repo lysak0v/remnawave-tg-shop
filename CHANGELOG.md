@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [3.7.0] — 2026-11-16
+
 Миграций БД нет, новых переменных нет. Новые ключи локалей: `menu_renew_inline`, `my_sub_*`, `traffic_gb_value`;
 `my_subscription_details` больше не используется.
 
