@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [3.9.0] — 2026-11-17
+
 Миграций БД нет, новых переменных нет. Новые ключи `days_one|few|many` (заменили `referral_days_*`); изменены
 `payment_successful_full`, `payment_successful_with_referral_bonus_full`, `payment_successful_with_promo_full`.
 
