@@ -3,7 +3,7 @@ import asyncio
 from typing import Dict, Any, Optional
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import (MenuButtonDefault, MenuButtonWebApp, WebAppInfo, BotCommand)
+from aiogram.types import (MenuButtonDefault, MenuButtonWebApp, WebAppInfo)
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -21,6 +21,7 @@ from bot.middlewares.db_session import DBSessionMiddleware
 from bot.middlewares.ban_check_middleware import BanCheckMiddleware
 from bot.middlewares.action_logger_middleware import ActionLoggerMiddleware
 from bot.middlewares.profile_sync import ProfileSyncMiddleware
+from bot.app.bot_commands import setup_bot_commands
 from bot.app.controllers.dispatcher_controller import build_dispatcher
 from bot.app.factories.build_services import build_core_services
 from bot.app.web.web_server import build_and_start_web_app
@@ -128,14 +129,7 @@ async def on_startup_configured(dispatcher: Dispatcher):
                 f"STARTUP: Failed to register mini app domain: {e}", exc_info=True
             )
 
-    if settings.START_COMMAND_DESCRIPTION:
-        try:
-            await bot.set_my_commands([
-                BotCommand(command="start", description=settings.START_COMMAND_DESCRIPTION)
-            ])
-            logging.info("STARTUP: /start command description set.")
-        except Exception as e:
-            logging.error(f"STARTUP: Failed to set bot commands: {e}", exc_info=True)
+    await setup_bot_commands(bot, i18n_instance, settings)
 
     # Initialize message queue manager
     try:
