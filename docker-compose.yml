@@ -1,6 +1,6 @@
 services:
   remnawave-tg-shop:
-    image: ghcr.io/lysak0v/remnawave-tg-shop:3.1.0
+    image: ghcr.io/lysak0v/remnawave-tg-shop:3.2.0
 #    build: .
     container_name: remnawave-tg-shop
     hostname: remnawave-tg-shop
@@ -9,7 +9,7 @@ services:
     networks:
       - remnawave-network
     volumes:
-      - ./locales:/app/locales
+      - ./locale_overrides:/app/locale_overrides:ro
     restart: unless-stopped
     depends_on:
       remnawave-tg-shop-db:

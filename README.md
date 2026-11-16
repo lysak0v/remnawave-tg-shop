@@ -373,6 +373,22 @@ cd /opt/remnawave/nginx && docker compose down && docker compose up -d && docker
 
 Для автоматической публикации образов настроены GitHub Actions (`.github/workflows`). По умолчанию образы пушатся в GitHub Container Registry и Docker Hub. Добавьте в Secrets репозитория значения `DOCKERHUB_USERNAME` и `DOCKERHUB_TOKEN` (персональный access token или пароль для Docker Hub), чтобы загрузка в Docker Hub работала корректно.
 
+### Свои тексты бота
+
+Полные локали (`locales/ru.json`, `en.json`) входят в образ. Чтобы поменять отдельные тексты, положите
+рядом с `docker-compose.yml` папку `locale_overrides/` с файлами `ru.json` / `en.json`, где **только изменённые
+ключи** — бот наложит их поверх встроенных (путь задаёт `LOCALE_OVERRIDES_PATH`, по умолчанию `locale_overrides`):
+
+```json
+{
+  "pay_with_yookassa_button": "💳 СБП или картой"
+}
+```
+
+Новые ключи при обновлении бота приходят с образом. Ключ, которого нет во встроенной локали (опечатка), бот
+отметит предупреждением в логе; битый JSON игнорируется с ошибкой в логе. Не монтируйте поверх образа всю папку
+`locales` — полная копия устаревает с каждым обновлением.
+
 ## 📁 Структура проекта
 
 ```
@@ -391,7 +407,8 @@ cd /opt/remnawave/nginx && docker compose down && docker compose up -d && docker
 │   ├── dal/              # Слой доступа к данным (DAL)
 │   ├── database_setup.py # Настройка БД
 │   └── models.py         # Модели SQLAlchemy
-├── locales/              # Файлы локализации (ru, en)
+├── locales/              # Файлы локализации (ru, en), входят в образ
+├── locale_overrides/     # (не в репозитории) свои тексты поверх locales, см. «Свои тексты бота»
 ├── .env.example          # Пример файла с переменными окружения
 ├── Dockerfile            # Инструкции для сборки Docker-образа
 ├── docker-compose.yml    # Файл для оркестрации контейнеров

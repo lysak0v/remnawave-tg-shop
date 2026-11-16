@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = Field(default="vpn_shop_db")
 
     DEFAULT_LANGUAGE: str = Field(default="ru")
+    LOCALE_OVERRIDES_PATH: Optional[str] = Field(
+        default="locale_overrides",
+        description="Directory with <lang>.json files holding only the texts changed by the operator; "
+                    "applied on top of the bundled locales")
 
     SUPPORT_LINK: Optional[str] = Field(default=None)
     SERVER_STATUS_URL: Optional[str] = Field(default=None)
