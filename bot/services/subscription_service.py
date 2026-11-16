@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List, NamedTuple, Tuple
 from aiogram import Bot
+from bot.utils.subscription_view import details_from_panel_user, is_renewal, subscription_state
 from bot.middlewares.i18n import JsonI18n
 
 from db.dal import user_dal, subscription_dal, promo_code_dal, user_billing_dal, payment_dal
@@ -177,20 +178,27 @@ class SubscriptionService:
             logging.exception(f"Failed to check active subscription for user {user_id}")
             return False
 
+    async def panel_subscription_state(
+        self, session: AsyncSession, user_id: int
+    ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """(state, details) of the user's panel subscription; (None, None) if the panel is unreachable."""
+        try:
+            reachable, panel_user = await self.find_panel_user(session, user_id)
+        except Exception:
+            logging.exception(f"Failed to look up panel subscription for user {user_id}")
+            return None, None
+        if not reachable:
+            return None, None
+        details = details_from_panel_user(panel_user)
+        return subscription_state(details, datetime.now(timezone.utc), self.settings.TRIAL_USER_TAG), details
+
     async def has_running_paid_subscription(self, session: AsyncSession, user_id: int) -> bool:
         """True when a paid subscription still runs in the panel, so renewal is offered.
 
         A trial (TRIAL_USER_TAG) is not renewed but bought; an unreachable panel -> False.
         """
-        try:
-            _, panel_user = await self.find_panel_user(session, user_id)
-        except Exception:
-            logging.exception(f"Failed to check paid subscription for user {user_id}")
-            return False
-        if not panel_user_is_active(panel_user, datetime.now(timezone.utc)):
-            return False
-        trial_tag = self.settings.TRIAL_USER_TAG
-        return not (trial_tag and panel_user.get("tag") == trial_tag)
+        state, _ = await self.panel_subscription_state(session, user_id)
+        return bool(state) and is_renewal(state)
 
     async def is_disabled_in_panel(self, session: AsyncSession, user_id: int) -> bool:
         """True only when the panel confirms the user is DISABLED (unreachable panel -> False)."""

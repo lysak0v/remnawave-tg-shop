@@ -21,6 +21,7 @@ from bot.services.subscription_service import SubscriptionService
 from bot.services.panel_api_service import PanelApiService
 from bot.services.referral_service import ReferralService
 from bot.services.promo_code_service import PromoCodeService
+from bot.utils.subscription_view import is_renewal, main_menu_text, menu_status_line, utc_now_local
 from config.settings import Settings
 from bot.middlewares.i18n import JsonI18n
 from bot.utils.text_sanitizer import sanitize_username, sanitize_display_name
@@ -39,7 +40,6 @@ async def send_main_menu(target_event: Union[types.Message,
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
 
     user_id = target_event.from_user.id
-    user_full_name = hd.quote(target_event.from_user.full_name)
 
     if not i18n:
         logging.error(
@@ -73,8 +73,15 @@ async def send_main_menu(target_event: Union[types.Message,
                 "Method has_had_any_subscription is missing in SubscriptionService for send_main_menu!"
             )
 
-    text = _(key="main_menu_greeting", user_name=user_full_name)
-    renew = await subscription_service.has_running_paid_subscription(session, user_id)
+    state, details = await subscription_service.panel_subscription_state(session, user_id)
+    status_line = menu_status_line(
+        state, details, get_text=_, lang=current_lang, now=utc_now_local(),
+        soon_days=settings.SUBSCRIPTION_NOTIFY_DAYS_BEFORE,
+        trial_days=settings.TRIAL_DURATION_DAYS if show_trial_button_in_menu else None,
+    ) if state else ""
+    first_name = hd.quote(target_event.from_user.first_name or target_event.from_user.full_name)
+    text = main_menu_text(first_name, status_line, _)
+    renew = bool(state) and is_renewal(state)
     reply_markup = get_main_menu_inline_keyboard(current_lang, i18n, settings,
                                                  show_trial_button_in_menu, renew=renew)
 

@@ -133,7 +133,10 @@ def test_names_are_html_escaped(get_text):
 
 def test_empty_list(get_text):
     text, rows = build_devices_view([], get_text, "3")
-    assert rows == [] and "нет устройств" in text
+    assert rows == [] and "Пока ни одного устройства." in text
+    assert text.endswith("Можно подключить до 3 устройств.")
+    assert build_devices_view([], get_text, "1")[0].endswith("Можно подключить до 1 устройства.")
+    assert build_devices_view([], get_text, "Без ограничений")[0].endswith("Устройств — сколько угодно.")
 
 
 def test_confirmation_screen(get_text):
