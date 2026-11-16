@@ -94,7 +94,7 @@ def device_details(device: Dict) -> str:
     return " · ".join(part for part in (device_os(device), device_app(device)) if part)
 
 
-def hwid_tails(hwids: Iterable[str], min_length: int = 4) -> Dict[str, str]:
+def hwid_tails(hwids: Iterable[str], min_length: int = 5) -> Dict[str, str]:
     """Shortest HWID endings (at least `min_length`) that tell the given devices apart."""
     hwids = [h for h in hwids if h]
     tails: Dict[str, str] = {}
@@ -129,3 +129,21 @@ def parse_panel_time(value: Optional[str]) -> Optional[datetime]:
 def days_since(moment: datetime, now: datetime) -> int:
     """Whole calendar days between the two moments in the local time zone of `now`."""
     return max(0, (now.date() - moment.astimezone(now.tzinfo).date()).days)
+
+
+def mask_hwid(hwid: Optional[str], keep: int = 5, stars: int = 5) -> str:
+    """First and last `keep` characters with stars between, so the line fits on a phone."""
+    if not hwid:
+        return "-"
+    if len(hwid) <= keep * 2 + 1:
+        return hwid
+    return f"{hwid[:keep]}{'*' * stars}{hwid[-keep:]}"
+
+
+def plural_form(number: int) -> str:
+    """Russian plural category: "one" (1, 21), "few" (2-4, 22-24) or "many" (5-20, 25...)."""
+    if number % 10 == 1 and number % 100 != 11:
+        return "one"
+    if 2 <= number % 10 <= 4 and not 12 <= number % 100 <= 14:
+        return "few"
+    return "many"
