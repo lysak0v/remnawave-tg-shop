@@ -115,7 +115,7 @@ def build_subscription_text(details: Optional[Dict[str, Any]], state: str, *, ge
         link = details.get("config_link")
         lines += ["", get_text("my_sub_link_label")]
         if link:
-            lines += [f"<code>{link}</code>", get_text("my_sub_link_copy_hint")]
+            lines += [get_text("my_sub_link_value", link=link), get_text("my_sub_link_copy_hint")]
         else:
             lines.append(get_text("config_link_not_available"))
     elif state in (EXPIRED, TRIAL_EXPIRED):
