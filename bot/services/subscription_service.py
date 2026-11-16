@@ -8,6 +8,7 @@ from bot.middlewares.i18n import JsonI18n
 from db.dal import user_dal, subscription_dal, promo_code_dal, user_billing_dal, payment_dal
 from bot.utils.date_utils import add_months
 from bot.utils.config_link import prepare_config_links
+from bot.utils.panel_description import merge_panel_description
 from db.models import User, Subscription
 
 from config.settings import Settings
@@ -55,6 +56,53 @@ def resolve_extension_base(
     return now
 
 
+def merge_squad_uuids(
+    panel_user: Dict[str, Any], configured: Optional[List[str]]
+) -> Optional[List[str]]:
+    """User's current internal squads plus the configured ones, or None if nothing to add."""
+    if not configured:
+        return None
+    current = [
+        squad.get("uuid") if isinstance(squad, dict) else squad
+        for squad in (panel_user.get("activeInternalSquads") or [])
+    ]
+    current = [uuid for uuid in current if uuid]
+    missing = [uuid for uuid in configured if uuid not in current]
+    if not missing:
+        return None
+    return current + missing
+
+
+def panel_user_is_disabled(panel_user: Optional[Dict[str, Any]]) -> bool:
+    return bool(panel_user) and panel_user.get("status") == "DISABLED"
+
+
+def panel_user_is_active(panel_user: Optional[Dict[str, Any]], now: datetime) -> bool:
+    if not panel_user or panel_user.get("status") != "ACTIVE":
+        return False
+    expire_at = _parse_panel_datetime(panel_user.get("expireAt"))
+    return expire_at is not None and expire_at > now
+
+
+def resolve_panel_tag(
+    desired_tag: Optional[str],
+    current_tag: Optional[str],
+    protected_tags: List[str],
+) -> Optional[str]:
+    """Tag to send to the panel, or None to leave the current one untouched.
+
+    Tags set by the admin by hand (e.g. FREE) are listed as protected and are never
+    replaced; an already matching tag needs no update.
+    """
+    if not desired_tag:
+        return None
+    if current_tag and current_tag in protected_tags:
+        return None
+    if current_tag == desired_tag:
+        return None
+    return desired_tag
+
+
 class SubscriptionService:
 
     def __init__(
@@ -77,24 +125,62 @@ class SubscriptionService:
             else self.settings.DEFAULT_LANGUAGE
         )
 
+    async def find_panel_user(
+        self, session: AsyncSession, user_id: int
+    ) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Look the user up in the panel without creating it: (panel_reachable, panel_user).
+
+        The bot is not the only source of users: the admin adds them in the panel too.
+        """
+        found = await self.panel_service.get_users_by_filter(
+            telegram_id=user_id, log_response=False
+        )
+        if found is None:
+            return False, None
+        if found:
+            return True, found[0]
+        db_user = await user_dal.get_user_by_id(session, user_id)
+        if db_user and db_user.panel_user_id:
+            by_id = await self.panel_service.get_user_by_panel_id(
+                db_user.panel_user_id, log_response=False
+            )
+            if by_id:
+                return True, by_id
+        return True, None
+
     async def has_had_any_subscription(self, session: AsyncSession, user_id: int) -> bool:
-        return await subscription_dal.has_any_subscription_for_user(session, user_id)
+        """True if the bot or the panel knows of any subscription of the user.
+
+        A user present in the panel has had one. When the panel cannot be queried the
+        answer is True, so no trial is offered on top of an unknown subscription.
+        """
+        if await subscription_dal.has_any_subscription_for_user(session, user_id):
+            return True
+        reachable, panel_user = await self.find_panel_user(session, user_id)
+        return not reachable or panel_user is not None
 
     async def has_active_subscription(self, session: AsyncSession, user_id: int) -> bool:
-        """Return True if user currently has an active subscription (end_date in future)."""
+        """True if the user has an active subscription locally or in the panel."""
+        now = datetime.now(timezone.utc)
         try:
             user_record = await user_dal.get_user_by_id(session, user_id)
-            if not user_record or not user_record.panel_user_id:
-                return False
-            active_sub = await subscription_dal.get_active_subscription_by_user_id(
-                session, user_id, user_record.panel_user_id
-            )
-            if not active_sub or not active_sub.end_date:
-                return False
-            from datetime import datetime, timezone
-            return active_sub.is_active and active_sub.end_date > datetime.now(timezone.utc)
+            if user_record and user_record.panel_user_id:
+                active_sub = await subscription_dal.get_active_subscription_by_user_id(
+                    session, user_id, user_record.panel_user_id
+                )
+                if active_sub and active_sub.end_date and active_sub.is_active \
+                        and active_sub.end_date > now:
+                    return True
+            _, panel_user = await self.find_panel_user(session, user_id)
+            return panel_user_is_active(panel_user, now)
         except Exception:
+            logging.exception(f"Failed to check active subscription for user {user_id}")
             return False
+
+    async def is_disabled_in_panel(self, session: AsyncSession, user_id: int) -> bool:
+        """True only when the panel confirms the user is DISABLED (unreachable panel -> False)."""
+        _, panel_user = await self.find_panel_user(session, user_id)
+        return panel_user_is_disabled(panel_user)
 
     async def _notify_admin_panel_user_creation_failed(self, user_id: int):
         if not self.bot or not self.i18n or not self.settings.ADMIN_IDS:
@@ -108,6 +194,27 @@ class SubscriptionService:
             except Exception as e:
                 logging.error(
                     f"Failed to notify admin {admin_id} about panel user creation failure: {e}"
+                )
+
+    async def _notify_admin_paid_while_disabled(self, user_id: int, panel_user_id: int):
+        logging.warning(
+            f"User {user_id} paid while DISABLED in the panel (panel id {panel_user_id}); "
+            "expiry extended, status left DISABLED."
+        )
+        if not self.bot or not self.i18n or not self.settings.ADMIN_IDS:
+            return
+        msg = self.i18n.gettext(
+            self.settings.DEFAULT_LANGUAGE,
+            "admin_paid_while_disabled",
+            user_id=user_id,
+            panel_user_id=panel_user_id,
+        )
+        for admin_id in self.settings.ADMIN_IDS:
+            try:
+                await self.bot.send_message(admin_id, msg)
+            except Exception as e:
+                logging.error(
+                    f"Failed to notify admin {admin_id} about payment from disabled user: {e}"
                 )
 
     async def _get_or_create_panel_user_link_details(
@@ -169,11 +276,7 @@ class SubscriptionService:
                     creation_response = await self.panel_service.create_panel_user(
                         username_on_panel=panel_username_on_panel_standard,
                         telegram_id=user_id,
-                        description="\n".join([
-                            (db_user.username or "") if db_user else "",
-                            (db_user.first_name or "") if db_user else "",
-                            (db_user.last_name or "") if db_user else "",
-                        ]),
+                        description=self._new_user_description(db_user),
                         specific_squad_uuids=self.settings.parsed_user_squad_uuids,
                         external_squad_uuid=self.settings.parsed_user_external_squad_uuid,
                         default_traffic_limit_bytes=self.settings.user_traffic_limit_bytes,
@@ -199,11 +302,7 @@ class SubscriptionService:
                 creation_response = await self.panel_service.create_panel_user(
                     username_on_panel=panel_username_on_panel_standard,
                     telegram_id=user_id,
-                    description="\n".join([
-                        (db_user.username or "") if db_user else "",
-                        (db_user.first_name or "") if db_user else "",
-                        (db_user.last_name or "") if db_user else "",
-                    ]),
+                    description=self._new_user_description(db_user),
                     specific_squad_uuids=self.settings.parsed_user_squad_uuids,
                     external_squad_uuid=self.settings.parsed_user_external_squad_uuid,
                     default_traffic_limit_bytes=self.settings.user_traffic_limit_bytes,
@@ -326,19 +425,10 @@ class SubscriptionService:
             logging.info(
                 f"Panel user {current_local_panel_id} has telegramId '{panel_telegram_id_from_api}'. Updating on panel to '{user_id}'."
             )
-            # Also set readable description with Telegram fields
+            fix_payload: Dict[str, Any] = {"telegramId": user_id}
+            self._apply_profile_description(fix_payload, db_user, panel_user_obj_from_api)
             await self.panel_service.update_user_details_on_panel(
-                current_local_panel_id,
-                {
-                    "telegramId": user_id,
-                    "description": "\n".join(
-                        [
-                            (db_user.username or "") if db_user else "",
-                            (db_user.first_name or "") if db_user else "",
-                            (db_user.last_name or "") if db_user else "",
-                        ]
-                    ),
-                },
+                current_local_panel_id, fix_payload
             )
 
         panel_sub_link_id = panel_user_obj_from_api.get(
@@ -386,9 +476,8 @@ class SubscriptionService:
                 "message_key": "trial_already_had_subscription_or_trial",
             }
 
-        panel_user_id, panel_sub_link_id, panel_short_uuid, panel_user_created_now = (
-            await self._get_or_create_panel_user_link_details(session, user_id, db_user)
-        )
+        panel_link = await self._ensure_panel_user(session, user_id, db_user)
+        panel_user_id, panel_sub_link_id, panel_short_uuid = panel_link[:3]
 
         if not panel_user_id or not panel_sub_link_id:
             logging.error(f"Failed to get panel link details for trial user {user_id}.")
@@ -396,6 +485,21 @@ class SubscriptionService:
                 "eligible": True,
                 "activated": False,
                 "message_key": "trial_activation_failed_panel_link",
+            }
+
+        # The local DB only knows what the bot itself created. A user that already exists
+        # in the panel (added by the admin, or before the last sync) has had a subscription;
+        # a trial would overwrite their expiry, traffic limit and squads.
+        panel_tag = (panel_link.panel_user or {}).get("tag")
+        if not panel_link.created_now or panel_tag in self.settings.parsed_protected_user_tags:
+            logging.info(
+                f"Trial refused for user {user_id}: panel user {panel_user_id} already existed "
+                f"(created_now={panel_link.created_now}, tag={panel_tag})."
+            )
+            return {
+                "eligible": False,
+                "activated": False,
+                "message_key": "trial_already_had_subscription_or_trial",
             }
 
         start_date = datetime.now(timezone.utc)
@@ -432,19 +536,15 @@ class SubscriptionService:
             }
 
         panel_update_payload = self._build_panel_update_payload(
+            panel_user=panel_link.panel_user,
             expire_at=end_date,
             status="ACTIVE",
             traffic_limit_bytes=self.settings.trial_traffic_limit_bytes,
         )
-
-        # Add user description based on Telegram profile
-        panel_update_payload["description"] = "\n".join(
-            [
-                (db_user.username or "") if db_user else "",
-                (db_user.first_name or "") if db_user else "",
-                (db_user.last_name or "") if db_user else "",
-            ]
+        self._apply_panel_tag(
+            panel_update_payload, self.settings.TRIAL_USER_TAG, panel_link.panel_user
         )
+        self._apply_profile_description(panel_update_payload, db_user, panel_link.panel_user)
 
         updated_panel_user = await self.panel_service.update_user_details_on_panel(
             panel_user_id, panel_update_payload
@@ -548,20 +648,21 @@ class SubscriptionService:
             logging.error("Failed to upsert traffic subscription for user %s: %s", user_id, exc, exc_info=True)
             return None
 
+        # an empty dict means the panel lookup failed
+        panel_user_record = panel_user_data or None
         panel_update_payload = self._build_panel_update_payload(
+            panel_user=panel_user_record,
             expire_at=final_end_date,
             status="ACTIVE",
             traffic_limit_bytes=new_limit,
             traffic_limit_strategy="NO_RESET",
         )
-
-        panel_update_payload["description"] = "\n".join(
-            [
-                (db_user.username or "") if db_user else "",
-                (db_user.first_name or "") if db_user else "",
-                (db_user.last_name or "") if db_user else "",
-            ]
+        self._apply_panel_tag(
+            panel_update_payload, self.settings.PAID_USER_TAG, panel_user_record
         )
+        self._apply_profile_description(panel_update_payload, db_user, panel_user_record)
+        if panel_user_is_disabled(panel_user_record):
+            await self._notify_admin_paid_while_disabled(user_id, panel_user_id)
 
         updated_panel_user = await self.panel_service.update_user_details_on_panel(
             panel_user_id, panel_update_payload
@@ -750,19 +851,17 @@ class SubscriptionService:
             return None
 
         panel_update_payload = self._build_panel_update_payload(
+            panel_user=panel_link.panel_user,
             expire_at=final_end_date,
             status="ACTIVE",
             traffic_limit_bytes=self.settings.user_traffic_limit_bytes,
         )
-
-        # Add user description based on Telegram profile
-        panel_update_payload["description"] = "\n".join(
-            [
-                (db_user.username or "") if db_user else "",
-                (db_user.first_name or "") if db_user else "",
-                (db_user.last_name or "") if db_user else "",
-            ]
+        self._apply_panel_tag(
+            panel_update_payload, self.settings.PAID_USER_TAG, panel_link.panel_user
         )
+        self._apply_profile_description(panel_update_payload, db_user, panel_link.panel_user)
+        if panel_user_is_disabled(panel_link.panel_user):
+            await self._notify_admin_paid_while_disabled(user_id, panel_user_id)
 
         updated_panel_user = await self.panel_service.update_user_details_on_panel(
             panel_user_id, panel_update_payload
@@ -891,6 +990,7 @@ class SubscriptionService:
         if updated_sub_model:
             # Prepare panel update payload
             panel_update_payload = self._build_panel_update_payload(
+                panel_user=panel_link.panel_user,
                 expire_at=new_end_date_obj,
                 traffic_limit_bytes=(
                     self.settings.user_traffic_limit_bytes if apply_main_traffic_limit else None
@@ -1158,21 +1258,81 @@ class SubscriptionService:
     def _build_panel_update_payload(
         self,
         *,
+        panel_user: Optional[Dict[str, Any]],
         expire_at: Optional[datetime] = None,
         status: Optional[str] = None,
         traffic_limit_bytes: Optional[int] = None,
         traffic_limit_strategy: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """PATCH payload that keeps what the admin set in the panel.
+
+        `panel_user` is the current panel record (None if unknown). Squads are added to the
+        user's current ones, an external squad is set only when the user has none, and a
+        user disabled in the panel stays disabled. Without the record squads are not sent.
+        """
         payload: Dict[str, Any] = {}
         if expire_at is not None:
             payload["expireAt"] = expire_at.isoformat(timespec="milliseconds").replace("+00:00", "Z")
         if status is not None:
-            payload["status"] = status
+            if panel_user_is_disabled(panel_user):
+                logging.warning(
+                    f"Panel user {panel_user.get('id')} is DISABLED in the panel; keeping the status instead of '{status}'."
+                )
+            else:
+                payload["status"] = status
         if traffic_limit_bytes is not None:
             payload["trafficLimitBytes"] = traffic_limit_bytes
             payload["trafficLimitStrategy"] = traffic_limit_strategy or self.settings.USER_TRAFFIC_STRATEGY
-        if self.settings.parsed_user_squad_uuids:
-            payload["activeInternalSquads"] = self.settings.parsed_user_squad_uuids
-        if self.settings.parsed_user_external_squad_uuid:
-            payload["externalSquadUuid"] = self.settings.parsed_user_external_squad_uuid
+        if panel_user is not None:
+            squads = merge_squad_uuids(panel_user, self.settings.parsed_user_squad_uuids)
+            if squads is not None:
+                payload["activeInternalSquads"] = squads
+            external = self.settings.parsed_user_external_squad_uuid
+            if external and not panel_user.get("externalSquadUuid"):
+                payload["externalSquadUuid"] = external
         return payload
+
+    def _new_user_description(self, db_user: Optional[User]) -> str:
+        if not db_user:
+            return ""
+        return merge_panel_description(
+            None,
+            db_user.username,
+            db_user.first_name,
+            db_user.last_name,
+            tz_name=self.settings.PANEL_DESCRIPTION_TIMEZONE,
+        ) or ""
+
+    def _apply_profile_description(
+        self,
+        payload: Dict[str, Any],
+        db_user: Optional[User],
+        panel_user: Optional[Dict[str, Any]],
+    ) -> None:
+        # Without the panel record the admin's text could be lost, so leave it alone.
+        if not db_user or panel_user is None:
+            return
+        description = merge_panel_description(
+            panel_user.get("description"),
+            db_user.username,
+            db_user.first_name,
+            db_user.last_name,
+            tz_name=self.settings.PANEL_DESCRIPTION_TIMEZONE,
+        )
+        if description is not None:
+            payload["description"] = description
+
+    def _apply_panel_tag(
+        self,
+        payload: Dict[str, Any],
+        desired_tag: Optional[str],
+        panel_user: Optional[Dict[str, Any]],
+    ) -> None:
+        # Without the panel record we cannot tell a protected tag apart, so leave it alone.
+        if not desired_tag or panel_user is None:
+            return
+        tag = resolve_panel_tag(
+            desired_tag, panel_user.get("tag"), self.settings.parsed_protected_user_tags
+        )
+        if tag:
+            payload["tag"] = tag

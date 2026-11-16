@@ -6,7 +6,8 @@ from aiogram.types import Update, User as TgUser
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.dal import user_dal
-from bot.utils.text_sanitizer import sanitize_username, sanitize_display_name, username_for_display
+from bot.utils.panel_description import merge_panel_description
+from bot.utils.text_sanitizer import sanitize_username, sanitize_display_name
 
 
 class ProfileSyncMiddleware(BaseMiddleware):
@@ -42,19 +43,27 @@ class ProfileSyncMiddleware(BaseMiddleware):
                             f"ProfileSyncMiddleware: Updated user {tg_user.id} profile fields: {list(update_payload.keys())}"
                         )
 
-                        # Also update description on panel if linked
+                        # Also append the new profile to the panel description if linked
                         try:
                             panel_service = data.get("panel_service")
+                            settings = data.get("settings")
                             if panel_service and db_user.panel_user_id:
-                                description_text = "\n".join([
-                                    username_for_display(tg_user.username, with_at=False) if sanitized_username is not None else "",
-                                    sanitized_first_name or "",
-                                    sanitized_last_name or "",
-                                ]).strip()
-                                await panel_service.update_user_details_on_panel(
-                                    db_user.panel_user_id,
-                                    {"description": description_text},
+                                panel_user = await panel_service.get_user_by_panel_id(
+                                    db_user.panel_user_id, log_response=False
                                 )
+                                # Without the current text the admin's notes could be lost.
+                                new_description = merge_panel_description(
+                                    panel_user.get("description"),
+                                    sanitized_username,
+                                    sanitized_first_name,
+                                    sanitized_last_name,
+                                    tz_name=getattr(settings, "PANEL_DESCRIPTION_TIMEZONE", "UTC"),
+                                ) if panel_user else None
+                                if new_description is not None:
+                                    await panel_service.update_user_details_on_panel(
+                                        db_user.panel_user_id,
+                                        {"description": new_description},
+                                    )
                         except Exception as e_upd_desc:
                             logging.warning(
                                 f"ProfileSyncMiddleware: Failed to update panel description for user {tg_user.id}: {e_upd_desc}"

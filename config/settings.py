@@ -1,7 +1,21 @@
 import logging
+import re
+from zoneinfo import ZoneInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, ValidationError, computed_field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
+
+# Remnawave accepts user tags of uppercase letters, digits and underscores, up to 16 chars.
+_PANEL_TAG_RE = re.compile(r"^[A-Z0-9_]{1,16}$")
+
+
+def _normalize_panel_tag(value: str, field_name: str) -> str:
+    tag = str(value).strip().upper()
+    if not _PANEL_TAG_RE.match(tag):
+        raise ValueError(
+            f"{field_name}: '{value}' is not a valid panel tag "
+            "(A-Z, 0-9, _ only, up to 16 characters)")
+    return tag
 
 
 class Settings(BaseSettings):
@@ -219,6 +233,19 @@ class Settings(BaseSettings):
     TRIAL_DURATION_DAYS: int = Field(default=3)
     TRIAL_TRAFFIC_LIMIT_GB: Optional[float] = Field(default=5.0)
 
+    TRIAL_USER_TAG: Optional[str] = Field(
+        default=None,
+        description="Panel tag set when a user activates a trial (empty = do not tag)")
+    PAID_USER_TAG: Optional[str] = Field(
+        default=None,
+        description="Panel tag set when a paid subscription or traffic package is activated (empty = do not tag)")
+    PROTECTED_USER_TAGS: Optional[str] = Field(
+        default=None,
+        description="Comma-separated panel tags the bot never overwrites, e.g. FREE")
+    PANEL_DESCRIPTION_TIMEZONE: str = Field(
+        default="UTC",
+        description="Time zone of the dated profile entries the bot appends to the panel user description")
+
     CRYPT4_ENABLED: bool = Field(default=False, description="Enable happ crypt4 encryption for subscription URLs")
     CRYPT4_REDIRECT_URL: Optional[str] = Field(default=None, description="Base redirect URL used for the connect button when crypt4 is enabled")
 
@@ -298,6 +325,14 @@ class Settings(BaseSettings):
                 if uuid.strip()
             ]
         return None
+
+    @computed_field
+    @property
+    def parsed_protected_user_tags(self) -> List[str]:
+        if not self.PROTECTED_USER_TAGS:
+            return []
+        return [_normalize_panel_tag(tag, "PROTECTED_USER_TAGS")
+                for tag in self.PROTECTED_USER_TAGS.split(',') if tag.strip()]
 
     @computed_field
     @property
@@ -646,6 +681,35 @@ class Settings(BaseSettings):
             return None
         return v
     
+    @field_validator('TRIAL_USER_TAG', 'PAID_USER_TAG', mode='before')
+    @classmethod
+    def validate_panel_tag(cls, v, info):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        return _normalize_panel_tag(v, info.field_name)
+
+    @field_validator('PANEL_DESCRIPTION_TIMEZONE', mode='before')
+    @classmethod
+    def validate_description_timezone(cls, v):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "UTC"
+        name = str(v).strip()
+        try:
+            ZoneInfo(name)
+        except Exception as exc:
+            raise ValueError(f"PANEL_DESCRIPTION_TIMEZONE: unknown time zone '{name}'") from exc
+        return name
+
+    @field_validator('PROTECTED_USER_TAGS', mode='before')
+    @classmethod
+    def validate_protected_user_tags(cls, v):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        for tag in str(v).split(','):
+            if tag.strip():
+                _normalize_panel_tag(tag, 'PROTECTED_USER_TAGS')
+        return v
+
     @field_validator(
         'REQUIRED_CHANNEL_ID',
         'FREEKASSA_PAYMENT_METHOD_ID',

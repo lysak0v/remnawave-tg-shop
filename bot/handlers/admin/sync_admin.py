@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from config.settings import Settings
 from bot.services.panel_api_service import PanelApiService
 from bot.services.notification_service import NotificationService
+from bot.utils.panel_description import merge_panel_description
 
 from db.dal import user_dal, subscription_dal, panel_sync_dal
 from db.models import Subscription
@@ -160,25 +161,20 @@ async def perform_sync(
                     users_panel_id_updated += 1
                     logging.info(f"Updated panel id for user {actual_user_id}: {panel_id}")
 
-                # Ensure panel description contains Telegram fields
+                # Append the Telegram profile to the panel description when it changed;
+                # the admin's own text there is kept.
                 try:
                     if panel_id and existing_user:
-                        description_text = "\n".join([
-                            existing_user.username or "",
-                            existing_user.first_name or "",
-                            existing_user.last_name or "",
-                        ])
-                        # Update description only when it differs from the current one on panel
-                        current_panel_description = (
-                            panel_user_dict.get("description") or ""
-                        ).strip()
-                        desired_description = description_text.strip()
-                        if (
-                            desired_description
-                            and desired_description != current_panel_description
-                        ):
+                        new_description = merge_panel_description(
+                            panel_user_dict.get("description"),
+                            existing_user.username,
+                            existing_user.first_name,
+                            existing_user.last_name,
+                            tz_name=settings.PANEL_DESCRIPTION_TIMEZONE,
+                        )
+                        if new_description is not None:
                             await panel_service.update_user_details_on_panel(
-                                panel_id, {"description": description_text}
+                                panel_id, {"description": new_description}
                             )
                 except Exception as e_desc:
                     logging.warning(

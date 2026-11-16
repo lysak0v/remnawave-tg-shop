@@ -40,12 +40,40 @@ def _hwid_callback_token(hwid: Optional[str]) -> str:
     return hashlib.sha256(hwid_str.encode()).hexdigest()[:32]
 
 
+async def refuse_if_disabled_in_panel(
+    event: Union[types.Message, types.CallbackQuery],
+    subscription_service: Optional[SubscriptionService],
+    session: AsyncSession,
+    get_text,
+) -> bool:
+    """Tell the user and return True if the admin disabled them in the panel."""
+    if not subscription_service or not event.from_user:
+        return False
+    try:
+        disabled = await subscription_service.is_disabled_in_panel(session, event.from_user.id)
+    except Exception:
+        logging.exception("Panel status check before payment failed")
+        return False
+    if not disabled:
+        return False
+    text = get_text("account_disabled_in_panel")
+    if isinstance(event, types.CallbackQuery):
+        try:
+            await event.answer(text, show_alert=True)
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+    else:
+        await event.answer(text)
+    return True
+
+
 async def display_subscription_options(
     event: Union[types.Message, types.CallbackQuery],
     i18n_data: dict,
     settings: Settings,
     session: AsyncSession,
     promo_code_service=None,
+    subscription_service: Optional[SubscriptionService] = None,
 ):
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
@@ -61,6 +89,9 @@ async def display_subscription_options(
                 logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
         elif isinstance(event, types.Message):
             await event.answer(err_msg)
+        return
+
+    if await refuse_if_disabled_in_panel(event, subscription_service, session, get_text):
         return
 
     currency_symbol_val = "RUB"
@@ -142,9 +173,11 @@ async def reshow_subscription_options_callback(
     settings: Settings,
     session: AsyncSession,
     promo_code_service=None,
+    subscription_service: Optional[SubscriptionService] = None,
 ):
     await display_subscription_options(
-        callback, i18n_data, settings, session, promo_code_service=promo_code_service
+        callback, i18n_data, settings, session, promo_code_service=promo_code_service,
+        subscription_service=subscription_service,
     )
 
 

@@ -5,6 +5,7 @@ from typing import Optional
 from aiogram import F, Router, types
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.handlers.user.subscription.core import refuse_if_disabled_in_panel
 from bot.keyboards.inline.user_keyboards import get_payment_method_keyboard
 from bot.middlewares.i18n import JsonI18n
 from config.settings import Settings
@@ -49,6 +50,7 @@ async def select_subscription_period_callback_handler(
     i18n_data: dict,
     session: AsyncSession,
     promo_code_service=None,  # Injected from dispatcher
+    subscription_service=None,  # Injected from dispatcher
 ):
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
@@ -59,6 +61,9 @@ async def select_subscription_period_callback_handler(
             await callback.answer(get_text("error_occurred_try_again"), show_alert=True)
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
+        return
+
+    if await refuse_if_disabled_in_panel(callback, subscription_service, session, get_text):
         return
 
     traffic_packages = getattr(settings, "traffic_packages", {}) or {}
