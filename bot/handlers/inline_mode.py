@@ -8,6 +8,7 @@ from config.settings import Settings
 from db.dal import user_dal, payment_dal
 from bot.services.referral_service import ReferralService
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.money import format_amount
 
 router = Router(name="inline_mode_router")
 
@@ -204,11 +205,11 @@ async def create_financial_stats_result(session: AsyncSession, i18n_instance, la
         
         stats_text = _(
             "inline_financial_stats_message",
-            today=financial_stats['today_revenue'],
+            today=format_amount(financial_stats['today_revenue']),
             today_count=financial_stats['today_payments_count'],
-            week=financial_stats['week_revenue'],
-            month=financial_stats['month_revenue'],
-            all_time=financial_stats['all_time_revenue']
+            week=format_amount(financial_stats['week_revenue']),
+            month=format_amount(financial_stats['month_revenue']),
+            all_time=format_amount(financial_stats['all_time_revenue'])
         )
         
         return InlineQueryResultArticle(
@@ -218,7 +219,7 @@ async def create_financial_stats_result(session: AsyncSession, i18n_instance, la
             ),
             description=_(
                 "inline_financial_description",
-                today=f"{financial_stats['today_revenue']:.2f}"
+                today=format_amount(financial_stats['today_revenue'])
             ),
             input_message_content=InputTextMessageContent(
                 message_text=stats_text,

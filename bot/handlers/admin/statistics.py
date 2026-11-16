@@ -12,6 +12,7 @@ from bot.services.panel_api_service import PanelApiService
 
 from bot.keyboards.inline.admin_keyboards import get_back_to_admin_panel_keyboard
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.money import currency_sign, format_amount, format_money
 
 router = Router(name="admin_statistics_router")
 
@@ -143,16 +144,16 @@ async def show_statistics_handler(callback: types.CallbackQuery,
         f"\n<b>💰 {_('admin_financial_stats_header')}</b>"
     )
     stats_text_parts.append(
-        f"📅 {_('admin_financial_today_label')}: <b>{financial_stats['today_revenue']:.2f} RUB</b> ({financial_stats['today_payments_count']} {_('admin_financial_payments_label')})"
+        f"📅 {_('admin_financial_today_label')}: <b>{format_money(financial_stats['today_revenue'])}</b> ({financial_stats['today_payments_count']} {_('admin_financial_payments_label')})"
     )
     stats_text_parts.append(
-        f"📅 {_('admin_financial_week_label')}: <b>{financial_stats['week_revenue']:.2f} RUB</b>"
+        f"📅 {_('admin_financial_week_label')}: <b>{format_money(financial_stats['week_revenue'])}</b>"
     )
     stats_text_parts.append(
-        f"📅 {_('admin_financial_month_label')}: <b>{financial_stats['month_revenue']:.2f} RUB</b>"
+        f"📅 {_('admin_financial_month_label')}: <b>{format_money(financial_stats['month_revenue'])}</b>"
     )
     stats_text_parts.append(
-        f"🏆 {_('admin_financial_all_time_label')}: <b>{financial_stats['all_time_revenue']:.2f} RUB</b>"
+        f"🏆 {_('admin_financial_all_time_label')}: <b>{format_money(financial_stats['all_time_revenue'])}</b>"
     )
 
     last_payments_models: List[
@@ -190,8 +191,8 @@ async def show_statistics_handler(callback: types.CallbackQuery,
             stats_text_parts.append(
                 _("admin_stats_payment_item",
                   status_emoji=status_emoji,
-                  amount=payment.amount,
-                  currency=payment.currency,
+                  amount=format_amount(payment.amount),
+                  currency=currency_sign(payment.currency),
                   user_info=user_info,
                   p_status=payment.status,
                   p_date=payment_date_str))

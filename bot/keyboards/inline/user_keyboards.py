@@ -3,6 +3,11 @@ from aiogram.types import InlineKeyboardMarkup, WebAppInfo
 from typing import Dict, Optional, List, Tuple
 
 from config.settings import Settings
+from bot.utils.money import format_amount
+
+
+# The yearly subscription is marked in the period list to nudge users towards it.
+HIGHLIGHTED_MONTHS = 12
 
 
 def get_main_menu_inline_keyboard(
@@ -107,14 +112,16 @@ def get_subscription_options_keyboard(subscription_options: Dict[
                     button_text = _(
                         "buy_traffic_package_button",
                         traffic_gb=_format_gb(months),
-                        price=price,
+                        price=format_amount(price),
                         currency_symbol=currency_symbol_val,
                     )
                     callback_data = f"subscribe_period:{_format_gb(months)}"
                 else:
-                    button_text = _("subscribe_for_months_button",
+                    key = ("subscribe_for_months_button_highlight"
+                           if float(months) == HIGHLIGHTED_MONTHS else "subscribe_for_months_button")
+                    button_text = _(key,
                                     months=months,
-                                    price=price,
+                                    price=format_amount(price),
                                     currency_symbol=currency_symbol_val)
                     callback_data = f"subscribe_period:{months}"
                 builder.button(text=button_text,

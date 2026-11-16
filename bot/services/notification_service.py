@@ -11,6 +11,7 @@ from config.settings import Settings
 from sqlalchemy.orm import sessionmaker
 from bot.middlewares.i18n import JsonI18n
 from bot.utils.message_queue import get_queue_manager
+from bot.utils.money import currency_sign, format_amount
 from bot.utils.text_sanitizer import (
     display_name_or_fallback,
     username_for_display,
@@ -244,8 +245,8 @@ class NotificationService:
                 "log_payment_received_traffic",
                 provider_emoji=provider_emoji,
                 user_display=user_display,
-                amount=amount,
-                currency=currency,
+                amount=format_amount(amount),
+                currency=currency_sign(currency),
                 traffic_gb=traffic_label,
                 payment_provider=payment_provider,
                 timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -255,8 +256,8 @@ class NotificationService:
                 "log_payment_received",
                 provider_emoji=provider_emoji,
                 user_display=user_display,
-                amount=amount,
-                currency=currency,
+                amount=format_amount(amount),
+                currency=currency_sign(currency),
                 months=months,
                 payment_provider=payment_provider,
                 timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")

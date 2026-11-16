@@ -9,6 +9,7 @@ from config.settings import Settings
 from bot.middlewares.i18n import JsonI18n
 from db.dal import ad_dal
 from bot.states.admin_states import AdminStates
+from bot.utils.money import format_amount
 
 router = Router(name="admin_ads_router")
 
@@ -29,7 +30,7 @@ async def show_ads_menu(callback: types.CallbackQuery, settings: Settings, i18n_
     totals = await ad_dal.get_totals(session)
     total_cost = totals.get("cost", 0.0)
     total_revenue = totals.get("revenue", 0.0)
-    overview = _("admin_ads_overview", revenue=f"{total_revenue:.2f}", cost=f"{total_cost:.2f}")
+    overview = _("admin_ads_overview", revenue=format_amount(total_revenue), cost=format_amount(total_cost))
 
     total_count = await ad_dal.count_campaigns(session)
     if total_count == 0:
@@ -65,7 +66,7 @@ async def ads_list_pagination(callback: types.CallbackQuery, settings: Settings,
         page = 0
 
     totals = await ad_dal.get_totals(session)
-    overview = _("admin_ads_overview", revenue=f"{totals.get('revenue', 0.0):.2f}", cost=f"{totals.get('cost', 0.0):.2f}")
+    overview = _("admin_ads_overview", revenue=format_amount(totals.get('revenue', 0.0)), cost=format_amount(totals.get('cost', 0.0)))
     total_count = await ad_dal.count_campaigns(session)
     total_pages = max(1, (total_count + PAGE_SIZE - 1) // PAGE_SIZE)
     page = max(0, min(page, total_pages - 1))
@@ -109,12 +110,12 @@ async def show_ad_card(callback: types.CallbackQuery, settings: Settings, i18n_d
         id=camp.ad_campaign_id,
         source=camp.source,
         start_param=camp.start_param,
-        cost=f"{camp.cost:.2f}",
+        cost=format_amount(camp.cost),
         active=_("csv_yes") if camp.is_active else _("csv_no"),
         starts=stats["starts"],
         trials=stats["trials"],
         payers=stats["payers"],
-        revenue=f"{stats['revenue']:.2f}",
+        revenue=format_amount(stats['revenue']),
     )
 
     from bot.keyboards.inline.admin_keyboards import get_ad_card_keyboard
@@ -189,12 +190,12 @@ async def ads_delete_cancel(callback: types.CallbackQuery, settings: Settings, i
         id=camp.ad_campaign_id,
         source=camp.source,
         start_param=camp.start_param,
-        cost=f"{camp.cost:.2f}",
+        cost=format_amount(camp.cost),
         active=_("csv_yes") if camp.is_active else _("csv_no"),
         starts=stats["starts"],
         trials=stats["trials"],
         payers=stats["payers"],
-        revenue=f"{stats['revenue']:.2f}",
+        revenue=format_amount(stats['revenue']),
     )
     from bot.keyboards.inline.admin_keyboards import get_ad_card_keyboard
     reply_markup = get_ad_card_keyboard(i18n, current_lang, camp.ad_campaign_id, back_page)
@@ -232,8 +233,8 @@ async def ads_delete_confirm(callback: types.CallbackQuery, settings: Settings, 
     totals = await ad_dal.get_totals(session)
     overview = _(
         "admin_ads_overview",
-        revenue=f"{totals.get('revenue', 0.0):.2f}",
-        cost=f"{totals.get('cost', 0.0):.2f}",
+        revenue=format_amount(totals.get('revenue', 0.0)),
+        cost=format_amount(totals.get('cost', 0.0)),
     )
     total_count = await ad_dal.count_campaigns(session)
     total_pages = max(1, (total_count + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -349,7 +350,7 @@ async def ads_create_flow(message: types.Message, state: FSMContext, settings: S
                 id=campaign.ad_campaign_id,
                 source=campaign.source,
                 start_param=campaign.start_param,
-                cost=f"{campaign.cost:.2f}",
+                cost=format_amount(campaign.cost),
             )
         )
         # Offer back to ads menu
