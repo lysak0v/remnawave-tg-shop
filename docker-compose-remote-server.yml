@@ -12,7 +12,7 @@ services:
     environment:
       - TZ=UTC
     volumes:
-      - ./locales:/app/locales
+      - ./locale_overrides:/app/locale_overrides:ro
     restart: unless-stopped
     depends_on:
       - remnawave-tg-shop-db
