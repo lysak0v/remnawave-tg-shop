@@ -46,6 +46,11 @@ def format_date(moment: datetime, lang: str, tz) -> str:
     return local.strftime("%d.%m.%Y")
 
 
+def days_text(days: int, get_text: Callable[..., str]) -> str:
+    """ "1 день" / "3 дня" / "30 дней"."""
+    return get_text(f"days_{plural_form(int(days))}", days=days)
+
+
 def devices_upto(max_devices: Optional[int], get_text: Callable[..., str]) -> str:
     """ "до 3 устройств" / "до 1 устройства", or the no-limit wording."""
     if not max_devices:

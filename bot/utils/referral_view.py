@@ -1,12 +1,7 @@
 """Referral texts: the bonus table of the referral screen and the message for a friend."""
 from typing import Callable, Dict, Optional
 
-from bot.utils.device_display import plural_form
-from bot.utils.subscription_view import devices_upto
-
-
-def _days(days: int, get_text: Callable[..., str]) -> str:
-    return get_text(f"referral_days_{plural_form(days)}", days=days)
+from bot.utils.subscription_view import days_text, devices_upto
 
 
 def bonus_table(periods, inviter: Dict, referee: Dict, get_text: Callable[..., str]) -> str:
@@ -18,10 +13,10 @@ def bonus_table(periods, inviter: Dict, referee: Dict, get_text: Callable[..., s
         if not inv and not ref:
             continue
         if inv == ref:
-            lines.append(get_text("referral_bonus_line_same", months=months, days=_days(inv, get_text)))
+            lines.append(get_text("referral_bonus_line_same", months=months, days=days_text(inv, get_text)))
         else:
             lines.append(get_text("referral_bonus_line_split", months=months,
-                                  inviter_days=_days(inv, get_text), referee_days=_days(ref, get_text)))
+                                  inviter_days=days_text(inv, get_text), referee_days=days_text(ref, get_text)))
     return "\n".join(lines)
 
 
