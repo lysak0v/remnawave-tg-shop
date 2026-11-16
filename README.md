@@ -373,6 +373,18 @@ cd /opt/remnawave/nginx && docker compose down && docker compose up -d && docker
 
 Для автоматической публикации образов настроены GitHub Actions (`.github/workflows`). По умолчанию образы пушатся в GitHub Container Registry и Docker Hub. Добавьте в Secrets репозитория значения `DOCKERHUB_USERNAME` и `DOCKERHUB_TOKEN` (персональный access token или пароль для Docker Hub), чтобы загрузка в Docker Hub работала корректно.
 
+### Команды бота
+
+| Команда | Кому | Что делает |
+| --- | --- | --- |
+| `/start` | всем | главное меню; `?start=ref_<код>` — реферал, `?start=promo_<код>` — промокод, `?start=<метка>` — рекламная кампания |
+| `/connect` | всем | моя подписка и ссылка подключения |
+| `/language` | всем | выбор языка |
+| `/admin`, `/sync`, `/syncstatus` | админам (`ADMIN_IDS`) | админ-панель, синхронизация с панелью и её статус |
+
+Команды для всех бот при старте регистрирует в меню Telegram — для каждого языка своё меню (тексты
+`bot_command_*` в локалях), общее — на `DEFAULT_LANGUAGE`.
+
 ### Свои тексты бота
 
 Полные локали (`locales/ru.json`, `en.json`) входят в образ. Чтобы поменять отдельные тексты, положите
