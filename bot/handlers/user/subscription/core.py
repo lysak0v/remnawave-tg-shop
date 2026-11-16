@@ -36,6 +36,7 @@ from bot.utils.subscription_view import (
     DISABLED,
     TRIAL,
     build_subscription_text,
+    devices_upto,
     is_renewal,
     last_seen_ago as _last_seen_ago,
     renew_first,
@@ -111,7 +112,11 @@ def build_devices_view(devices: list, get_text, max_devices_display: str,
     in the list; the buttons carry the device type and the same number.
     """
     if not devices:
-        return get_text("no_devices_details_found_message", max_devices=max_devices_display), []
+        limit = int(max_devices_display) if str(max_devices_display).isdigit() else None
+        limit_line = (get_text("devices_empty_limit", devices=devices_upto(limit, get_text)) if limit
+                      else get_text("devices_empty_unlimited"))
+        return get_text("no_devices_details_found_message", max_devices=max_devices_display,
+                        limit_line=limit_line), []
     tails = hwid_tails(d.get("hwid") for d in devices)
     blocks, buttons, any_idle = [], [], False
     for index, device in enumerate(devices, start=1):
@@ -336,13 +341,7 @@ async def my_subscription_command_handler(
     )]
     rows = []
     if running:
-        connect_url = details.get("connect_button_url") or details.get("config_link")
-        if settings.SUBSCRIPTION_MINI_APP_URL:
-            rows.append([InlineKeyboardButton(
-                text=get_text("connect_button"), web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
-            )])
-        elif connect_url:
-            rows.append([InlineKeyboardButton(text=get_text("connect_button"), url=connect_url)])
+        rows += _connect_rows(details, settings, get_text)
         if settings.MY_DEVICES_SECTION_ENABLED:
             max_devices = details.get("max_devices")
             rows.append([InlineKeyboardButton(
@@ -384,6 +383,18 @@ async def my_subscription_command_handler(
             )
     else:
         await target.answer(text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
+
+
+def _connect_rows(details: dict, settings: Settings, get_text) -> list:
+    """«🔗 Подключиться»: the mini app when configured, else the subscription page link."""
+    if settings.SUBSCRIPTION_MINI_APP_URL:
+        return [[InlineKeyboardButton(
+            text=get_text("connect_button"), web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
+        )]]
+    connect_url = details.get("connect_button_url") or details.get("config_link")
+    if connect_url:
+        return [[InlineKeyboardButton(text=get_text("connect_button"), url=connect_url)]]
+    return []
 
 
 def _count_devices(devices_response) -> Optional[int]:
@@ -513,6 +524,8 @@ async def my_devices_command_handler(
             max_devices_display = str(max_devices_value)
 
     text, devices_kb = build_devices_view(devices_list_raw, get_text, max_devices_display)
+    if not devices_list_raw:
+        devices_kb = _connect_rows(active, settings, get_text)
 
     base_markup = get_back_to_main_menu_markup(current_lang, i18n, callback_data="main_action:my_subscription")
     markup = InlineKeyboardMarkup(inline_keyboard=devices_kb + base_markup.inline_keyboard)

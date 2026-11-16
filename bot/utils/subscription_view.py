@@ -46,6 +46,14 @@ def format_date(moment: datetime, lang: str, tz) -> str:
     return local.strftime("%d.%m.%Y")
 
 
+def devices_upto(max_devices: Optional[int], get_text: Callable[..., str]) -> str:
+    """ "до 3 устройств" / "до 1 устройства", or the no-limit wording."""
+    if not max_devices:
+        return get_text("devices_upto_any")
+    form = "one" if plural_form(int(max_devices)) == "one" else "many"
+    return get_text(f"devices_upto_{form}", n=max_devices)
+
+
 def last_seen_ago(days: int, get_text: Callable[..., str]) -> str:
     if days == 0:
         return get_text("device_seen_today")
@@ -141,3 +149,47 @@ def renew_first(details: Optional[Dict[str, Any]], state: str, now: datetime, so
 def utc_now_local() -> datetime:
     """Current time in the server's local zone (MSK on prod), as the device list uses."""
     return datetime.now(timezone.utc).astimezone()
+
+
+def details_from_panel_user(panel_user: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The fields subscription_state needs, taken from a raw panel user record."""
+    if not panel_user:
+        return None
+    return {
+        "status_from_panel": panel_user.get("status"),
+        "end_date": parse_panel_time(panel_user.get("expireAt")),
+        "tag": panel_user.get("tag"),
+    }
+
+
+def menu_status_line(state: str, details: Optional[Dict[str, Any]], *, get_text, lang: str,
+                     now: datetime, soon_days: int = 3, trial_days: Optional[int] = None) -> str:
+    """One line about the subscription under the main menu greeting ("" when nothing to say)."""
+    end_date = (details or {}).get("end_date")
+    date_str = format_date(end_date, lang, now.tzinfo) if end_date else ""
+    if state in (ACTIVE, TRIAL):
+        days_left = (end_date.astimezone(now.tzinfo).date() - now.date()).days
+        if days_left <= 0:
+            return get_text("menu_status_ends_today")
+        if state == ACTIVE and days_left <= soon_days:
+            return get_text(f"menu_status_soon_{plural_form(days_left)}", days=days_left)
+        return get_text("menu_status_active" if state == ACTIVE else "menu_status_trial", date=date_str)
+    if state == EXPIRED:
+        return get_text("menu_status_expired", date=date_str)
+    if state == TRIAL_EXPIRED:
+        return get_text("menu_status_trial_expired", date=date_str)
+    if state == LIMITED:
+        return get_text("my_sub_limited")
+    if state == DISABLED:
+        return get_text("menu_status_disabled")
+    if trial_days:
+        return get_text(f"menu_status_try_free_{plural_form(trial_days)}", days=trial_days)
+    return get_text("menu_status_none")
+
+
+def main_menu_text(first_name: str, status_line: str, get_text) -> str:
+    parts = [get_text("main_menu_greeting", user_name=first_name)]
+    if status_line:
+        parts.append(status_line)
+    parts.append(get_text("main_menu_prompt"))
+    return "\n\n".join(parts)
