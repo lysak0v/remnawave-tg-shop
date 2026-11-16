@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [3.8.0] — 2026-11-17
+
 Миграций БД нет, новых переменных нет. Новые ключи локалей: `main_menu_prompt`, `menu_status_*`, `devices_empty_*`,
 `devices_upto_*`, `referral_bonus_line_*`, `referral_days_*`, `referral_bonus_rule_*`; изменены `main_menu_greeting`,
 `subscription_*_notification`, `no_devices_details_found_message`, `referral_friend_message`, `referral_program_info_new`
