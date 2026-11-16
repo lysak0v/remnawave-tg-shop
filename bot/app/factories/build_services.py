@@ -78,6 +78,7 @@ def build_core_services(
         settings.LKNPD_INN,
         settings.LKNPD_PASSWORD,
         api_url=settings.LKNPD_API_URL,
+        timezone_name=settings.LKNPD_TIMEZONE,
     )
 
     # Wire services that depend on each other

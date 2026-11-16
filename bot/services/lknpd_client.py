@@ -6,7 +6,7 @@ Custom implementation for lknpd.nalog.ru API.
 import asyncio
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, tzinfo
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -51,13 +51,14 @@ def _generate_device_id() -> str:
     return str(uuid.uuid4()).replace("-", "")[:21].lower()
 
 
-def _format_datetime(dt: datetime) -> str:
-    """Format datetime to ISO/ATOM format with Z suffix."""
+def _format_datetime(dt: datetime, tz: tzinfo = UTC) -> str:
+    """Format datetime to ISO/ATOM format in `tz`: "Z" suffix for UTC, else the offset ("+03:00").
+
+    «Мой налог» shows the receipt time with the offset it was sent with. Naive values are UTC.
+    """
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
-    elif dt.tzinfo != UTC:
-        dt = dt.astimezone(UTC)
-    return dt.isoformat().replace("+00:00", "Z")
+    return dt.astimezone(tz).isoformat().replace("+00:00", "Z")
 
 
 class LknpdClient:
@@ -92,9 +93,11 @@ class LknpdClient:
         self,
         base_url: str = "https://lknpd.nalog.ru/api",
         timeout: float = 10.0,
+        timezone: tzinfo = UTC,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.timezone = timezone
         self.device_id = _generate_device_id()
         self._token_data: dict[str, Any] | None = None
         self._refresh_lock = asyncio.Lock()
@@ -266,8 +269,8 @@ class LknpdClient:
 
         # Build request
         request_data = {
-            "operationTime": _format_datetime(op_time),
-            "requestTime": _format_datetime(now),
+            "operationTime": _format_datetime(op_time, self.timezone),
+            "requestTime": _format_datetime(now, self.timezone),
             "services": [
                 {
                     "name": name,
