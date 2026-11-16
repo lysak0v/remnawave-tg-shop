@@ -7,6 +7,7 @@ import pytest
 from bot.handlers.user.subscription.core import (
     _hwid_callback_token,
     build_devices_view,
+    index_mark,
     build_disconnect_confirmation,
 )
 from bot.middlewares.i18n import JsonI18n
@@ -85,23 +86,44 @@ def test_identical_devices_are_told_apart(get_text):
     ]
     text, rows = build_devices_view(twins, get_text, "3")
     assert "Мои устройства (2/3)" in text
-    assert "<b>1. 📱 iPhone 15 Pro</b>\niOS 18.5 · Happ 6.1.0\nПодключено: 12.10.2026" in text
+    assert "1️⃣ <b>📱 iPhone 15 Pro</b>\niOS 18.5 · Happ 6.1.0\nПодключено: 12.10.2026" in text
+    assert "2️⃣ <b>📱 iPhone 15 Pro</b>" in text
     assert "Подключено: 03.11.2026" in text
     # HWID is shortened to fit one line on a phone; the user agent is not shown
     assert "<code>0f9e8*****a7f3a</code>" in text and "<code>1a2b3*****f9c21</code>" in text
     assert "User Agent" not in text
-    buttons = [row[0] for row in rows]
-    # the button ends with the same 5 characters as the HWID line
-    assert [b.text for b in buttons] == ["✖️ 1. iPhone 15 Pro · …a7f3a", "✖️ 2. iPhone 15 Pro · …f9c21"]
+    # both buttons in one row: device type + call to action + the number from the list
+    assert len(rows) == 1
+    buttons = rows[0]
+    assert [b.text for b in buttons] == ["📱 Удалить №1", "📱 Удалить №2"]
     assert buttons[0].callback_data == f"disconnect_device:{_hwid_callback_token('0f9e8d7c6b5a7f3a')}"
     assert all(len(b.callback_data.encode()) <= 64 for b in buttons)
 
 
-def test_long_name_is_shortened_in_button_only(get_text):
+def test_long_name_stays_in_the_list_and_out_of_the_button(get_text):
     device = _dev("OpenWrt Linux", "Xiaomi Redmi Router AX6000 (OpenWrt U-Boot layout)", "6.12", "sing-box")
     text, rows = build_devices_view([device], get_text, "3")
     assert "Xiaomi Redmi Router AX6000 (OpenWrt U-Boot layout)" in text
-    assert rows[0][0].text == "✖️ 1. Xiaomi Redmi Router AX6… · …60708"  # 24 chars incl. "…"
+    assert rows[0][0].text == "📡 Удалить №1"
+
+
+@pytest.mark.parametrize("count, layout", [(1, [1]), (2, [2]), (3, [2, 1]), (4, [2, 2]), (5, [2, 2, 1])])
+def test_buttons_two_per_row(get_text, count, layout):
+    devices = [_dev("iOS", "iPhone", "18", "Happ/1.0/ios", hwid=f"hwid-{i:012d}") for i in range(count)]
+    _, rows = build_devices_view(devices, get_text, "5")
+    assert [len(row) for row in rows] == layout
+
+
+def test_button_emoji_follows_device_type(get_text):
+    devices = [_dev("Windows", "HOME-PC_x86_64", "10_10.0.19045", "Happ/4.7.2/Windows", hwid="aaaaaaaaaaaa1"),
+               _dev("AndroidTV", "MiTV", "11", "Happ/4.8.0/AndroidTV", hwid="bbbbbbbbbbbb2")]
+    _, rows = build_devices_view(devices, get_text, "5")
+    assert [b.text for b in rows[0]] == ["💻 Удалить №1", "📺 Удалить №2"]
+
+
+@pytest.mark.parametrize("index, mark", [(1, "1️⃣"), (3, "3️⃣"), (10, "🔟"), (11, "№11")])
+def test_index_mark(index, mark):
+    assert index_mark(index) == mark
 
 
 def test_names_are_html_escaped(get_text):
@@ -117,9 +139,10 @@ def test_empty_list(get_text):
 def test_confirmation_screen(get_text):
     device = _dev("iOS", "iPhone 15 Pro", "18.5", "Happ/6.1.0/ios", hwid="0f9e8d7c6b5a7f3a")
     text, markup = build_disconnect_confirmation(device, get_text)
-    assert text.startswith("Отключить это устройство?")
+    assert text.startswith("Удалить это устройство?")
     assert "<code>0f9e8*****a7f3a</code>" in text
     yes, no = markup.inline_keyboard[0][0], markup.inline_keyboard[1][0]
+    assert yes.text == "🗑 Да, удалить"
     assert yes.callback_data == f"disconnect_device_do:{_hwid_callback_token('0f9e8d7c6b5a7f3a')}"
     assert no.callback_data == "main_action:my_devices"
 
