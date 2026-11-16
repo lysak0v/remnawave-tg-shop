@@ -6,6 +6,7 @@ model ("HOME-PC_x86_64") and "10_10.0.19045" into the OS version, Android client
 into "💻 HOME-PC" / "Windows 10 · Happ 4.7.2".
 """
 import re
+from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional
 
 # Known VPN clients, matched case-insensitively against the start of the user agent.
@@ -108,3 +109,23 @@ def hwid_tails(hwids: Iterable[str], min_length: int = 4) -> Dict[str, str]:
 
 def short_hwid(tail: Optional[str]) -> str:
     return f"…{tail}" if tail else "-"
+
+
+# A device that has not requested the subscription for longer is marked as idle.
+IDLE_AFTER_DAYS = 30
+
+
+def parse_panel_time(value: Optional[str]) -> Optional[datetime]:
+    """Panel timestamp ("2026-11-16T11:04:00.000Z") as an aware datetime, None if unusable."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def days_since(moment: datetime, now: datetime) -> int:
+    """Whole calendar days between the two moments in the local time zone of `now`."""
+    return max(0, (now.date() - moment.astimezone(now.tzinfo).date()).days)
