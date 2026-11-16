@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [3.1.0] — 2026-11-16
+
+Требования без изменений (Remnawave ≥ 3.0), миграций БД нет. Новые переменные — `TRIAL_USER_TAG`,
+`PAID_USER_TAG`, `PROTECTED_USER_TAGS`, `PANEL_DESCRIPTION_TIMEZONE` (все необязательные). Если локали
+смонтированы с хоста, обновите их: добавлены ключи `account_disabled_in_panel`, `admin_paid_while_disabled`.
+
 ### Added
 
 - Теги пользователей в панели: при активации триала ставится `TRIAL_USER_TAG`, при оплате подписки или
