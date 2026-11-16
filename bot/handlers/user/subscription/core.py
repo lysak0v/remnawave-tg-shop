@@ -6,7 +6,7 @@ from aiogram import Router, F, types, Bot
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from typing import Optional, Union
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -22,8 +22,11 @@ from bot.middlewares.i18n import JsonI18n
 from bot.utils.device_display import (
     device_details,
     device_emoji,
+    IDLE_AFTER_DAYS,
+    days_since,
     device_name,
     hwid_tails,
+    parse_panel_time,
     short_hwid,
 )
 from db.dal import subscription_dal, user_billing_dal
@@ -41,15 +44,33 @@ def _hwid_callback_token(hwid: Optional[str]) -> str:
 _BUTTON_NAME_LIMIT = 24
 
 
-def _device_fields(device: dict, get_text, hwid_tail: Optional[str] = None) -> dict:
-    """Placeholders for device texts; the old ones are kept for operator overrides."""
+def _last_seen_ago(days: int, get_text) -> str:
+    if days == 0:
+        return get_text("device_seen_today")
+    if days == 1:
+        return get_text("device_seen_yesterday")
+    return get_text("device_seen_days_ago", days=days)
+
+
+def _device_fields(device: dict, get_text, hwid_tail: Optional[str] = None,
+                   now: Optional[datetime] = None) -> dict:
+    """Placeholders for device texts; the old ones are kept for operator overrides.
+
+    The panel refreshes `updatedAt` of a HWID record on every subscription request from
+    that device, so it is shown as the last request. Times are in the server's local zone.
+    """
+    now = now or datetime.now(timezone.utc).astimezone()  # server's local zone
     name = device_name(device, fallback=get_text("device_unknown_name"))
-    created_at = device.get("createdAt")
-    try:
-        created_at_str = datetime.fromisoformat(str(created_at).replace("Z", "+00:00")).strftime(
-            "%d.%m.%Y") if created_at else "-"
-    except ValueError:
-        created_at_str = str(created_at)
+    created_at = parse_panel_time(device.get("createdAt"))
+    created_at_str = created_at.astimezone(now.tzinfo).strftime("%d.%m.%Y") if created_at else "-"
+    last_seen = parse_panel_time(device.get("updatedAt")) or created_at
+    if last_seen:
+        idle_days = days_since(last_seen, now)
+        last_seen_str = last_seen.astimezone(now.tzinfo).strftime("%d.%m.%Y %H:%M")
+        last_seen_ago = _last_seen_ago(idle_days, get_text)
+        idle_mark = " 💤" if idle_days > IDLE_AFTER_DAYS else ""
+    else:
+        last_seen_str, last_seen_ago, idle_mark = "-", get_text("device_seen_unknown"), ""
     button_name = name if len(name) <= _BUTTON_NAME_LIMIT else name[:_BUTTON_NAME_LIMIT - 1] + "…"
     return {
         "emoji": device_emoji(device),
@@ -59,6 +80,9 @@ def _device_fields(device: dict, get_text, hwid_tail: Optional[str] = None) -> d
         "hwid": html.escape(device.get("hwid") or "-"),
         "hwid_short": short_hwid(hwid_tail),
         "created_at_str": created_at_str,
+        "last_seen_str": last_seen_str,
+        "last_seen_ago": last_seen_ago,
+        "idle_mark": idle_mark,
         "device_model": html.escape(device.get("deviceModel") or "-"),
         "platform": html.escape(device.get("platform") or "-"),
         "os_version": html.escape(device.get("osVersion") or "-"),
@@ -66,7 +90,8 @@ def _device_fields(device: dict, get_text, hwid_tail: Optional[str] = None) -> d
     }
 
 
-def build_devices_view(devices: list, get_text, max_devices_display: str):
+def build_devices_view(devices: list, get_text, max_devices_display: str,
+                       now: Optional[datetime] = None):
     """Device list text and one disconnect button per device.
 
     Identical devices (same model, OS and app) differ by number, connection date and HWID
@@ -75,22 +100,24 @@ def build_devices_view(devices: list, get_text, max_devices_display: str):
     if not devices:
         return get_text("no_devices_details_found_message", max_devices=max_devices_display), []
     tails = hwid_tails(d.get("hwid") for d in devices)
-    blocks, rows = [], []
+    blocks, rows, any_idle = [], [], False
     for index, device in enumerate(devices, start=1):
-        fields = _device_fields(device, get_text, tails.get(device.get("hwid")))
+        fields = _device_fields(device, get_text, tails.get(device.get("hwid")), now)
+        any_idle = any_idle or bool(fields["idle_mark"])
         blocks.append(get_text("device_details", index=index, **fields))
         if device.get("hwid"):
             rows.append([InlineKeyboardButton(
                 text=get_text("disconnect_device_button", index=index, **fields),
                 callback_data=f"disconnect_device:{_hwid_callback_token(device['hwid'])}",
             )])
-    text = get_text("my_devices_details", devices="\n\n".join(blocks),
+    idle_note = get_text("devices_idle_note", days=IDLE_AFTER_DAYS) if any_idle else ""
+    text = get_text("my_devices_details", devices="\n\n".join(blocks), idle_note=idle_note,
                     current_devices=len(devices), max_devices=max_devices_display)
     return text, rows
 
 
-def build_disconnect_confirmation(device: dict, get_text):
-    fields = _device_fields(device, get_text)
+def build_disconnect_confirmation(device: dict, get_text, now: Optional[datetime] = None):
+    fields = _device_fields(device, get_text, now=now)
     token = _hwid_callback_token(device.get("hwid"))
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=get_text("disconnect_device_confirm_button"),

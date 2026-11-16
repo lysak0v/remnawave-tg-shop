@@ -1,4 +1,5 @@
 """Device list: readable names, identical devices told apart, confirmation before disconnect."""
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -118,3 +119,57 @@ def test_confirmation_screen(get_text):
     yes, no = markup.inline_keyboard[0][0], markup.inline_keyboard[1][0]
     assert yes.callback_data == f"disconnect_device_do:{_hwid_callback_token('0f9e8d7c6b5a7f3a')}"
     assert no.callback_data == "main_action:my_devices"
+
+
+# --- last subscription request -------------------------------------------------------------
+
+MSK = timezone(timedelta(hours=3))
+NOW = datetime(2026, 11, 16, 14, 50, tzinfo=MSK)
+
+
+def _seen(updated, hwid="0f9e8d7c6b5a7f3a"):
+    device = _dev("iOS", "iPhone 15 Pro", "18.5", "Happ/6.1.0/ios", hwid=hwid, created="2026-07-20T16:23:00Z")
+    device["updatedAt"] = updated
+    return device
+
+
+@pytest.mark.parametrize(
+    "updated, line",
+    [
+        ("2026-11-16T11:45:00.000Z", "Последний запрос: 16.11.2026 14:45 (сегодня)\n"),
+        # 23:30 UTC on the 15th is already the 16th in Moscow
+        ("2026-11-15T23:30:00.000Z", "Последний запрос: 16.11.2026 02:30 (сегодня)\n"),
+        ("2026-11-15T08:00:00.000Z", "Последний запрос: 15.11.2026 11:00 (вчера)\n"),
+        ("2026-11-07T08:00:00.000Z", "Последний запрос: 07.11.2026 11:00 (9 дн. назад)\n"),
+        ("2026-10-07T16:21:00.000Z", "Последний запрос: 07.10.2026 19:21 (40 дн. назад) 💤\n"),
+    ],
+)
+def test_last_request_line(get_text, updated, line):
+    text, _ = build_devices_view([_seen(updated)], get_text, "3", now=NOW)
+    assert line in text
+
+
+def test_idle_note_only_when_an_idle_device_exists(get_text):
+    fresh, _ = build_devices_view([_seen("2026-11-16T11:45:00Z")], get_text, "3", now=NOW)
+    assert "💤" not in fresh
+    stale, _ = build_devices_view(
+        [_seen("2026-11-16T11:45:00Z", "aaaa1111"), _seen("2026-10-07T16:21:00Z", "bbbb2222")],
+        get_text, "3", now=NOW)
+    assert "💤 — устройство не запрашивало подписку больше 30 дн." in stale
+    assert stale.count("💤") == 2  # the mark on the idle device and the note
+
+
+def test_exactly_30_days_is_not_idle_yet(get_text):
+    text, _ = build_devices_view([_seen("2026-10-17T09:00:00Z")], get_text, "3", now=NOW)
+    assert "(30 дн. назад)" in text and "💤" not in text
+
+
+def test_missing_update_time_falls_back_to_connection_time(get_text):
+    device = _seen(None)
+    text, _ = build_devices_view([device], get_text, "3", now=NOW)
+    assert "Последний запрос: 20.07.2026 19:23 (119 дн. назад) 💤" in text
+
+
+def test_confirmation_shows_last_request(get_text):
+    text, _ = build_disconnect_confirmation(_seen("2026-10-07T16:21:00Z"), get_text, now=NOW)
+    assert "Последний запрос: 07.10.2026 19:21 (40 дн. назад) 💤" in text
