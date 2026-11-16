@@ -13,6 +13,7 @@ from yookassa.domain.models.amount import Amount as YooKassaAmount
 
 from db.dal import payment_dal, user_dal, user_billing_dal
 
+from bot.utils.subscription_view import days_text, format_date, utc_now_local
 from bot.services.subscription_service import SubscriptionService
 from bot.services.referral_service import ReferralService
 from bot.services.panel_api_service import PanelApiService
@@ -29,6 +30,11 @@ YOOKASSA_EVENT_PAYMENT_SUCCEEDED = 'payment.succeeded'
 YOOKASSA_EVENT_PAYMENT_CANCELED = 'payment.canceled'
 YOOKASSA_EVENT_PAYMENT_WAITING_FOR_CAPTURE = 'payment.waiting_for_capture'
 
+
+
+def _user_date(moment, lang: str) -> str:
+    """End date as users read it ("18.03.2027", en "Mar 18, 2027") in the server's zone."""
+    return format_date(moment, lang, utc_now_local().tzinfo)
 
 async def process_successful_payment(session: AsyncSession, bot: Bot,
                                      payment_info_from_webhook: dict,
@@ -460,9 +466,9 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
                 details_message = _(
                     "payment_successful_with_referral_bonus_full",
                     months=int(subscription_months),
-                    base_end_date=base_subscription_end_date.strftime('%Y-%m-%d'),
-                    bonus_days=applied_referee_bonus_days_from_referral,
-                    final_end_date=final_end_date_for_user.strftime('%Y-%m-%d'),
+                    base_end_date=_user_date(base_subscription_end_date, user_lang),
+                    bonus_days=days_text(applied_referee_bonus_days_from_referral, _),
+                    final_end_date=_user_date(final_end_date_for_user, user_lang),
                     inviter_name=inviter_name_display,
                     config_link=config_link_text,
                 )
@@ -470,15 +476,15 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
                 details_message = _(
                     "payment_successful_with_promo_full",
                     months=int(subscription_months),
-                    bonus_days=applied_promo_bonus_days,
-                    end_date=final_end_date_for_user.strftime('%Y-%m-%d'),
+                    bonus_days=days_text(applied_promo_bonus_days, _),
+                    end_date=_user_date(final_end_date_for_user, user_lang),
                     config_link=config_link_text,
                 )
             elif final_end_date_for_user:
                 details_message = _(
                     "payment_successful_full",
                     months=int(subscription_months),
-                    end_date=final_end_date_for_user.strftime('%Y-%m-%d'),
+                    end_date=_user_date(final_end_date_for_user, user_lang),
                     config_link=config_link_text,
                 )
             else:
