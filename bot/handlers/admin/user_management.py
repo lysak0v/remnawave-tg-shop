@@ -18,6 +18,7 @@ from bot.services.panel_api_service import PanelApiService
 from bot.services.referral_service import ReferralService
 from bot.middlewares.i18n import JsonI18n
 from bot.utils import get_message_content, send_direct_message
+from bot.utils.money import format_money
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 from bot.utils.text_sanitizer import (
     sanitize_display_name,
@@ -290,11 +291,11 @@ async def format_user_card(user: User, session: AsyncSession,
             
             # Total amount paid by this user
             total_paid = await payment_dal.get_user_total_paid(session, user.user_id)
-            card_parts.append(f"{_('admin_user_total_paid_label')} {hcode(f'{total_paid:.2f} RUB')}")
+            card_parts.append(f"{_('admin_user_total_paid_label')} {hcode(format_money(total_paid))}")
             
             # Total revenue from referrals
             referral_revenue = await payment_dal.get_referral_revenue(session, user.user_id)
-            card_parts.append(f"{_('admin_user_referral_revenue_label')} {hcode(f'{referral_revenue:.2f} RUB')}")
+            card_parts.append(f"{_('admin_user_referral_revenue_label')} {hcode(format_money(referral_revenue))}")
         except Exception as e_fin:
             logging.error(f"Failed to build financial analytics for admin card {user.user_id}: {e_fin}")
 
