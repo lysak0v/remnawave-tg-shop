@@ -9,6 +9,8 @@ from sqlalchemy.orm import sessionmaker
 from typing import Optional
 from config.settings import Settings
 from .panel_api_service import PanelApiService
+from bot.utils.device_display import parse_panel_time
+from bot.utils.subscription_view import format_date, utc_now_local
 from bot.middlewares.i18n import JsonI18n
 from bot.keyboards.inline.user_keyboards import get_subscribe_only_markup, get_autorenew_cancel_keyboard
 from db.dal import user_dal
@@ -23,6 +25,12 @@ EXPIRATION_REMINDERS = {
     -24: (1, "subscription_24h_notification"),
 }
 EXPIRED_YESTERDAY_OFFSET = 24
+
+
+def _end_date(user_payload: dict, lang: str) -> str:
+    """Subscription end as users read it ("19.11.2026", en "Nov 19, 2026") in the server's zone."""
+    end = parse_panel_time(user_payload.get("expireAt"))
+    return format_date(end, lang, utc_now_local().tzinfo) if end else ""
 
 class PanelWebhookService:
     def __init__(self, bot: Bot, settings: Settings, i18n: JsonI18n, async_session_factory: sessionmaker, panel_service: PanelApiService):
@@ -125,7 +133,7 @@ class PanelWebhookService:
                     msg_key,
                     reply_markup=markup,
                     user_name=first_name,
-                    end_date=user_payload.get("expireAt", "")[:10],
+                    end_date=_end_date(user_payload, lang),
                 )
         elif event_name == "user.expired":
             if self.settings.SUBSCRIPTION_NOTIFY_ON_EXPIRE:
@@ -135,7 +143,7 @@ class PanelWebhookService:
                     "subscription_expired_notification",
                     reply_markup=markup,
                     user_name=first_name,
-                    end_date=user_payload.get("expireAt", "")[:10],
+                    end_date=_end_date(user_payload, lang),
                 )
         elif expiration_offset == EXPIRED_YESTERDAY_OFFSET and self.settings.SUBSCRIPTION_NOTIFY_AFTER_EXPIRE:
             await self._send_message(
@@ -144,7 +152,7 @@ class PanelWebhookService:
                 "subscription_expired_yesterday_notification",
                 reply_markup=markup,
                 user_name=first_name,
-                end_date=user_payload.get("expireAt", "")[:10],
+                end_date=_end_date(user_payload, lang),
             )
 
     async def handle_webhook(self, raw_body: bytes, signature_header: Optional[str]) -> web.Response:

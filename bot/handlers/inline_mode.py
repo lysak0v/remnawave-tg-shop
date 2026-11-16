@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import Settings
 from db.dal import user_dal, payment_dal
+from bot.utils.referral_view import friend_message
 from bot.services.referral_service import ReferralService
 from bot.middlewares.i18n import JsonI18n
 from bot.utils.money import format_amount
@@ -102,9 +103,8 @@ async def create_referral_result(
             return None
         
         # Create message content (use same text as friend message)
-        message_text = _(
-            "referral_friend_message",
-            referral_link=referral_link
+        message_text = friend_message(
+            _, referral_link, settings.referral_bonus_referee, settings.USER_HWID_DEVICE_LIMIT
         )
         
         return InlineQueryResultArticle(
