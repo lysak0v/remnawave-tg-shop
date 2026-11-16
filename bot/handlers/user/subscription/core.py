@@ -28,10 +28,20 @@ from bot.utils.device_display import (
     hwid_tails,
     mask_hwid,
     parse_panel_time,
-    plural_form,
     short_hwid,
 )
 from bot.utils.money import RUB_SIGN
+from bot.utils.subscription_view import (
+    ACTIVE,
+    DISABLED,
+    TRIAL,
+    build_subscription_text,
+    is_renewal,
+    last_seen_ago as _last_seen_ago,
+    renew_first,
+    subscription_state,
+    utc_now_local,
+)
 from db.dal import subscription_dal, user_billing_dal
 from db.models import Subscription
 
@@ -52,15 +62,6 @@ _KEYCAPS = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7
 def index_mark(index: int) -> str:
     """Prominent number for the device list: keycap emoji up to 10, then "№11"."""
     return _KEYCAPS[index - 1] if 1 <= index <= len(_KEYCAPS) else f"№{index}"
-
-
-def _last_seen_ago(days: int, get_text) -> str:
-    if days == 0:
-        return get_text("device_seen_today")
-    if days == 1:
-        return get_text("device_seen_yesterday")
-    # one/few/many keys: Russian needs three forms ("1 день", "2 дня", "5 дней")
-    return get_text(f"device_seen_days_ago_{plural_form(days)}", days=days)
 
 
 def _device_fields(device: dict, get_text, hwid_tail: Optional[str] = None,
@@ -306,180 +307,65 @@ async def my_subscription_command_handler(
         await target.answer(get_text("error_service_unavailable"))
         return
 
-    active = await subscription_service.get_active_subscription_details(session, event.from_user.id)
-
-    if not active:
-        text = get_text("subscription_not_active")
-
-        buy_button = InlineKeyboardButton(
-            text=get_text("menu_subscribe_inline"), callback_data="main_action:subscribe"
-        )
-        back_markup = get_back_to_main_menu_markup(current_lang, i18n)
-
-        kb = InlineKeyboardMarkup(inline_keyboard=[[buy_button], *back_markup.inline_keyboard])
-
-        if isinstance(event, types.CallbackQuery):
-            try:
-                await event.answer()
-            except Exception as exc:
-                logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
-            try:
-                await event.message.edit_text(text, reply_markup=kb)
-            except Exception:
-                await event.message.answer(text, reply_markup=kb)
-        else:
-            await event.answer(text, reply_markup=kb)
-        return
-
-    end_date = active.get("end_date")
-    days_left = (end_date.date() - datetime.now().date()).days if end_date else 0
+    details = await subscription_service.get_active_subscription_details(session, event.from_user.id)
+    now = utc_now_local()
+    state = subscription_state(details, now, settings.TRIAL_USER_TAG)
     traffic_mode = bool(getattr(settings, "traffic_sale_mode", False))
-    config_link_display = active.get("config_link")
-    connect_button_url = active.get("connect_button_url")
-    config_link_value = config_link_display or get_text("config_link_not_available")
-    def _fmt_gb(val: Optional[float]) -> str:
-        if val is None:
-            return get_text("traffic_na")
-        try:
-            if isinstance(val, (int, float)):
-                val_gb = float(val) / (2**30)
-                return f"{val_gb:.2f} GB"
-        except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
-        return str(val)
+    soon_days = settings.SUBSCRIPTION_NOTIFY_DAYS_BEFORE
+    running = state in (ACTIVE, TRIAL)
 
-    if traffic_mode:
-        limit_display = _fmt_gb(active.get("traffic_limit_bytes"))
-        used_display = _fmt_gb(active.get("traffic_used_bytes"))
-        remaining_display = get_text("traffic_na")
+    devices_count: Optional[int] = None
+    if running and settings.MY_DEVICES_SECTION_ENABLED and details.get("user_id"):
         try:
-            limit_val = active.get("traffic_limit_bytes") or 0
-            used_val = active.get("traffic_used_bytes") or 0
-            remaining_val = max(0, float(limit_val) - float(used_val))
-            remaining_display = _fmt_gb(remaining_val)
-        except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
-        text = get_text(
-            "my_traffic_details",
-            status=active.get("status_from_panel", get_text("status_active")).capitalize(),
-            end_date=end_date.strftime("%Y-%m-%d") if end_date else get_text("traffic_no_expiry"),
-            traffic_limit=limit_display,
-            traffic_used=used_display,
-            traffic_left=remaining_display,
-            config_link=config_link_value,
-        )
+            devices_count = _count_devices(await panel_service.get_user_devices(details["user_id"]))
+        except Exception:
+            logging.exception("Failed to load devices for user %s", details.get("user_id"))
+
+    if traffic_mode and details:
+        text = _traffic_details_text(details, get_text)
     else:
-        text = get_text(
-            "my_subscription_details",
-            end_date=end_date.strftime("%Y-%m-%d") if end_date else "N/A",
-            days_left=max(0, days_left),
-            status=active.get("status_from_panel", get_text("status_active")).capitalize(),
-            config_link=config_link_value,
-            traffic_limit=(f"{active['traffic_limit_bytes'] / 2**30:.2f} GB" if active.get("traffic_limit_bytes") else get_text("traffic_unlimited")),
-            traffic_used=(
-                f"{active['traffic_used_bytes'] / 2**30:.2f} GB" if active.get("traffic_used_bytes") is not None else get_text("traffic_na")
-            ),
+        text = build_subscription_text(
+            details, state, get_text=get_text, lang=current_lang, now=now,
+            devices_count=devices_count, show_devices=settings.MY_DEVICES_SECTION_ENABLED,
+            soon_days=soon_days,
         )
 
-    base_markup = get_back_to_main_menu_markup(current_lang, i18n)
-    kb = base_markup.inline_keyboard
-    try:
-        local_sub = await subscription_dal.get_active_subscription_by_user_id(session, event.from_user.id)
-        # Build rows to prepend above the base "back" markup
-        prepend_rows = []
-
-        # 1) Mini-app connect button on top if enabled, otherwise fall back to config link URL
+    buy_row = [InlineKeyboardButton(
+        text=get_text("menu_renew_inline" if is_renewal(state) else "menu_subscribe_inline"),
+        callback_data="main_action:subscribe",
+    )]
+    rows = []
+    if running:
+        connect_url = details.get("connect_button_url") or details.get("config_link")
         if settings.SUBSCRIPTION_MINI_APP_URL:
-            prepend_rows.append([
-                InlineKeyboardButton(
-                    text=get_text("connect_button"),
-                    web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
-                )
-            ])
-        else:
-            cfg_link_val = connect_button_url or config_link_display
-            if cfg_link_val:
-                prepend_rows.append([
-                    InlineKeyboardButton(
-                        text=get_text("connect_button"),
-                        url=cfg_link_val,
-                    )
-                ])
-
+            rows.append([InlineKeyboardButton(
+                text=get_text("connect_button"), web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
+            )])
+        elif connect_url:
+            rows.append([InlineKeyboardButton(text=get_text("connect_button"), url=connect_url)])
         if settings.MY_DEVICES_SECTION_ENABLED:
-            max_devices_value = active.get("max_devices")
-            max_devices_display = get_text("devices_unlimited_label")
-            if max_devices_value not in (None, 0):
-                try:
-                    max_devices_int = int(max_devices_value)
-                    if max_devices_int >= 0:
-                        max_devices_display = str(max_devices_int)
-                except (TypeError, ValueError):
-                    max_devices_display = str(max_devices_value)
-            current_devices_display = "?"
-            panel_user_id = active.get("user_id")
-            devices_response = None
-            if panel_user_id:
-                try:
-                    devices_response = await panel_service.get_user_devices(panel_user_id)
-                except Exception:
-                    logging.exception("Failed to load devices for user %s", panel_user_id)
-            if devices_response:
-                devices_count: Optional[int] = None
-                if isinstance(devices_response, dict):
-                    devices_list = devices_response.get("devices")
-                    if isinstance(devices_list, list):
-                        devices_count = len(devices_list)
-                    elif isinstance(devices_list, int):
-                        devices_count = devices_list
-                    else:
-                        try:
-                            devices_count = len(devices_list)  # type: ignore[arg-type]
-                        except Exception:
-                            devices_count = None
-                    if devices_count is None:
-                        total_value = devices_response.get("total")
-                        if isinstance(total_value, int):
-                            devices_count = total_value
-                elif isinstance(devices_response, list):
-                    devices_count = len(devices_response)
-                if devices_count is not None:
-                    current_devices_display = str(devices_count)
-            devices_button_text = get_text(
-                "devices_button",
-                current_devices=current_devices_display,
-                max_devices=max_devices_display,
-            )
-            prepend_rows.append([
-                InlineKeyboardButton(
-                    text=devices_button_text,
-                    callback_data="main_action:my_devices",
-                )
-            ])
-
-        # 2) Auto-renew toggle (YooKassa only)
-        if not traffic_mode and local_sub and local_sub.provider == "yookassa" and settings.yookassa_autopayments_active:
-            toggle_text = (
-                get_text("autorenew_disable_button") if local_sub.auto_renew_enabled else get_text("autorenew_enable_button")
-            )
-            prepend_rows.append([
-                InlineKeyboardButton(
-                    text=toggle_text,
-                    callback_data=f"toggle_autorenew:{local_sub.subscription_id}:{1 if not local_sub.auto_renew_enabled else 0}",
-                )
-            ])
-
-        # 3) Payment methods management (when autopayments enabled)
-        if not traffic_mode and settings.yookassa_autopayments_active:
-            prepend_rows.append([
-                InlineKeyboardButton(text=get_text("payment_methods_manage_button"), callback_data="pm:manage")
-            ])
-
-        if prepend_rows:
-            kb = prepend_rows + kb
-    except Exception as exc:
-        logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
-    markup = InlineKeyboardMarkup(inline_keyboard=kb)
+            max_devices = details.get("max_devices")
+            rows.append([InlineKeyboardButton(
+                text=get_text(
+                    "devices_button",
+                    current_devices="?" if devices_count is None else devices_count,
+                    max_devices=max_devices or get_text("devices_unlimited_label"),
+                ),
+                callback_data="main_action:my_devices",
+            )])
+        if renew_first(details, state, now, soon_days):
+            rows.insert(0, buy_row)
+        else:
+            rows.append(buy_row)
+        rows += await _autorenew_rows(session, event.from_user.id, settings, traffic_mode, get_text)
+    elif state == DISABLED:
+        if settings.SUPPORT_LINK:
+            rows.append([InlineKeyboardButton(text=get_text("menu_support_button"), url=settings.SUPPORT_LINK)])
+    else:
+        rows.append(buy_row)
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=rows + get_back_to_main_menu_markup(current_lang, i18n).inline_keyboard
+    )
 
     if isinstance(event, types.CallbackQuery):
         try:
@@ -498,6 +384,62 @@ async def my_subscription_command_handler(
             )
     else:
         await target.answer(text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
+
+
+def _count_devices(devices_response) -> Optional[int]:
+    """Number of HWID devices from the panel answer (a list, or a dict with devices/total)."""
+    if isinstance(devices_response, list):
+        return len(devices_response)
+    if not isinstance(devices_response, dict):
+        return None
+    devices = devices_response.get("devices")
+    if isinstance(devices, list):
+        return len(devices)
+    if isinstance(devices, int):
+        return devices
+    total = devices_response.get("total")
+    return total if isinstance(total, int) else None
+
+
+def _traffic_details_text(details: dict, get_text) -> str:
+    """Traffic sale mode keeps the older layout with the remaining amount."""
+    def _fmt_gb(val: Optional[float]) -> str:
+        if isinstance(val, (int, float)):
+            return f"{float(val) / 2**30:.2f} GB"
+        return get_text("traffic_na")
+
+    limit_val = details.get("traffic_limit_bytes") or 0
+    used_val = details.get("traffic_used_bytes") or 0
+    end_date = details.get("end_date")
+    return get_text(
+        "my_traffic_details",
+        status=details.get("status_from_panel", get_text("status_active")).capitalize(),
+        end_date=end_date.strftime("%Y-%m-%d") if end_date else get_text("traffic_no_expiry"),
+        traffic_limit=_fmt_gb(details.get("traffic_limit_bytes")),
+        traffic_used=_fmt_gb(details.get("traffic_used_bytes")),
+        traffic_left=_fmt_gb(max(0, float(limit_val) - float(used_val))),
+        config_link=details.get("config_link") or get_text("config_link_not_available"),
+    )
+
+
+async def _autorenew_rows(session: AsyncSession, user_id: int, settings: Settings,
+                          traffic_mode: bool, get_text) -> list:
+    """Auto-renew toggle and card management (YooKassa autopayments only)."""
+    if traffic_mode or not settings.yookassa_autopayments_active:
+        return []
+    rows = []
+    try:
+        local_sub = await subscription_dal.get_active_subscription_by_user_id(session, user_id)
+    except Exception:
+        logging.exception("Failed to load local subscription for auto-renew buttons")
+        local_sub = None
+    if local_sub and local_sub.provider == "yookassa":
+        rows.append([InlineKeyboardButton(
+            text=get_text("autorenew_disable_button" if local_sub.auto_renew_enabled else "autorenew_enable_button"),
+            callback_data=f"toggle_autorenew:{local_sub.subscription_id}:{1 if not local_sub.auto_renew_enabled else 0}",
+        )])
+    rows.append([InlineKeyboardButton(text=get_text("payment_methods_manage_button"), callback_data="pm:manage")])
+    return rows
 
 
 @router.callback_query(F.data == "main_action:my_devices")

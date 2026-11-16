@@ -14,7 +14,9 @@ def get_main_menu_inline_keyboard(
         lang: str,
         i18n_instance,
         settings: Settings,
-        show_trial_button: bool = False) -> InlineKeyboardMarkup:
+        show_trial_button: bool = False,
+        renew: bool = False) -> InlineKeyboardMarkup:
+    """Main menu; `renew` offers renewal instead of purchase to users with a paid subscription."""
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
 
@@ -24,7 +26,7 @@ def get_main_menu_inline_keyboard(
                                  callback_data="main_action:request_trial"))
 
     builder.row(
-        InlineKeyboardButton(text=_(key="menu_subscribe_inline"),
+        InlineKeyboardButton(text=_(key="menu_renew_inline" if renew else "menu_subscribe_inline"),
                              callback_data="main_action:subscribe"))
     builder.row(
         InlineKeyboardButton(
@@ -325,10 +327,10 @@ def get_back_to_main_menu_markup(lang: str,
     return builder.as_markup()
 
 
-def get_subscribe_only_markup(lang: str, i18n_instance) -> InlineKeyboardMarkup:
+def get_subscribe_only_markup(lang: str, i18n_instance, renew: bool = False) -> InlineKeyboardMarkup:
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
-    builder.button(text=_(key="menu_subscribe_inline"),
+    builder.button(text=_(key="menu_renew_inline" if renew else "menu_subscribe_inline"),
                    callback_data="main_action:subscribe")
     return builder.as_markup()
 
