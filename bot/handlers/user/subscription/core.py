@@ -26,7 +26,9 @@ from bot.utils.device_display import (
     days_since,
     device_name,
     hwid_tails,
+    mask_hwid,
     parse_panel_time,
+    plural_form,
     short_hwid,
 )
 from db.dal import subscription_dal, user_billing_dal
@@ -49,7 +51,8 @@ def _last_seen_ago(days: int, get_text) -> str:
         return get_text("device_seen_today")
     if days == 1:
         return get_text("device_seen_yesterday")
-    return get_text("device_seen_days_ago", days=days)
+    # one/few/many keys: Russian needs three forms ("1 день", "2 дня", "5 дней")
+    return get_text(f"device_seen_days_ago_{plural_form(days)}", days=days)
 
 
 def _device_fields(device: dict, get_text, hwid_tail: Optional[str] = None,
@@ -77,7 +80,8 @@ def _device_fields(device: dict, get_text, hwid_tail: Optional[str] = None,
         "name": html.escape(name),
         "button_name": button_name,
         "details": html.escape(device_details(device)),
-        "hwid": html.escape(device.get("hwid") or "-"),
+        "hwid": html.escape(mask_hwid(device.get("hwid"))),
+        "hwid_full": html.escape(device.get("hwid") or "-"),
         "hwid_short": short_hwid(hwid_tail),
         "created_at_str": created_at_str,
         "last_seen_str": last_seen_str,
