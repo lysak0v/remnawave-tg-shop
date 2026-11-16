@@ -138,6 +138,7 @@ async def request_trial_confirmation_handler(
             logging.debug("Suppressed exception in bot/handlers/user/trial_handler.py: %s", exc)
         if (
             settings.TRIAL_ENABLED
+            and (activation_result or {}).get("eligible", True)
             and not await subscription_service.has_had_any_subscription(
                 session, user_id
             )
@@ -278,6 +279,7 @@ async def confirm_activate_trial_handler(
             logging.debug("Suppressed exception in bot/handlers/user/trial_handler.py: %s", exc)
         if (
             settings.TRIAL_ENABLED
+            and (activation_result or {}).get("eligible", True)
             and not await subscription_service.has_had_any_subscription(
                 session, user_id
             )
