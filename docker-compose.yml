@@ -1,6 +1,6 @@
 services:
   remnawave-tg-shop:
-    image: ghcr.io/lysak0v/remnawave-tg-shop:3.2.0
+    image: ghcr.io/lysak0v/remnawave-tg-shop:3.3.0
 #    build: .
     container_name: remnawave-tg-shop
     hostname: remnawave-tg-shop
