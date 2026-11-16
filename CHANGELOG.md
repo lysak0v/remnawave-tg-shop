@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [3.5.3] — 2026-11-16
+
 Миграций БД нет. Новая переменная `NALOGO_TIMEZONE` (по умолчанию `Europe/Moscow`).
 
 ### Fixed
