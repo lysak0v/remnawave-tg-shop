@@ -102,6 +102,11 @@ class Settings(BaseSettings):
         alias="NALOGO_RECEIPT_NAME_TRAFFIC",
         description="Receipt item name for traffic packages. Use {gb} placeholder for traffic amount."
     )
+    LKNPD_TIMEZONE: str = Field(
+        default="Europe/Moscow",
+        alias="NALOGO_TIMEZONE",
+        description="Time zone of the operation time sent with receipts; «Мой налог» shows the receipt time in it"
+    )
 
     WEBHOOK_BASE_URL: Optional[str] = None
     TELEGRAM_WEBHOOK_PATH: str = Field(
@@ -702,6 +707,18 @@ class Settings(BaseSettings):
             ZoneInfo(name)
         except Exception as exc:
             raise ValueError(f"PANEL_DESCRIPTION_TIMEZONE: unknown time zone '{name}'") from exc
+        return name
+
+    @field_validator('LKNPD_TIMEZONE', mode='before')
+    @classmethod
+    def validate_receipt_timezone(cls, v):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "Europe/Moscow"
+        name = str(v).strip()
+        try:
+            ZoneInfo(name)
+        except Exception as exc:
+            raise ValueError(f"NALOGO_TIMEZONE: unknown time zone '{name}'") from exc
         return name
 
     @field_validator('PROTECTED_USER_TAGS', mode='before')

@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from .lknpd_client import LknpdClient, PaymentType, LknpdApiError
 
@@ -12,11 +13,14 @@ class LknpdService:
         inn: Optional[str],
         password: Optional[str],
         api_url: str = "https://lknpd.nalog.ru/api",
+        timezone_name: str = "Europe/Moscow",
     ) -> None:
         self.inn = inn.strip() if inn else None
         self.password = password
         self.configured = bool(self.inn and self.password)
-        self._client = LknpdClient(base_url=api_url) if self.configured else None
+        self._client = (
+            LknpdClient(base_url=api_url, timezone=ZoneInfo(timezone_name)) if self.configured else None
+        )
         self._auth_lock = asyncio.Lock()
 
         if not self.configured:
