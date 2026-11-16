@@ -44,6 +44,13 @@ def _hwid_callback_token(hwid: Optional[str]) -> str:
 
 
 _BUTTON_NAME_LIMIT = 24
+_BUTTONS_PER_ROW = 2
+_KEYCAPS = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟")
+
+
+def index_mark(index: int) -> str:
+    """Prominent number for the device list: keycap emoji up to 10, then "№11"."""
+    return _KEYCAPS[index - 1] if 1 <= index <= len(_KEYCAPS) else f"№{index}"
 
 
 def _last_seen_ago(days: int, get_text) -> str:
@@ -96,24 +103,26 @@ def _device_fields(device: dict, get_text, hwid_tail: Optional[str] = None,
 
 def build_devices_view(devices: list, get_text, max_devices_display: str,
                        now: Optional[datetime] = None):
-    """Device list text and one disconnect button per device.
+    """Device list text and a grid of delete buttons, two per row.
 
     Identical devices (same model, OS and app) differ by number, connection date and HWID
-    in the list, and by number and the HWID ending in the buttons.
+    in the list; the buttons carry the device type and the same number.
     """
     if not devices:
         return get_text("no_devices_details_found_message", max_devices=max_devices_display), []
     tails = hwid_tails(d.get("hwid") for d in devices)
-    blocks, rows, any_idle = [], [], False
+    blocks, buttons, any_idle = [], [], False
     for index, device in enumerate(devices, start=1):
         fields = _device_fields(device, get_text, tails.get(device.get("hwid")), now)
         any_idle = any_idle or bool(fields["idle_mark"])
-        blocks.append(get_text("device_details", index=index, **fields))
+        blocks.append(get_text("device_details", index=index, index_mark=index_mark(index), **fields))
         if device.get("hwid"):
-            rows.append([InlineKeyboardButton(
+            buttons.append(InlineKeyboardButton(
                 text=get_text("disconnect_device_button", index=index, **fields),
                 callback_data=f"disconnect_device:{_hwid_callback_token(device['hwid'])}",
-            )])
+            ))
+    # two per row; with an odd count the last one takes the whole row
+    rows = [buttons[i:i + _BUTTONS_PER_ROW] for i in range(0, len(buttons), _BUTTONS_PER_ROW)]
     idle_note = get_text("devices_idle_note", days=IDLE_AFTER_DAYS) if any_idle else ""
     text = get_text("my_devices_details", devices="\n\n".join(blocks), idle_note=idle_note,
                     current_devices=len(devices), max_devices=max_devices_display)
