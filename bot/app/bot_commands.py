@@ -11,7 +11,7 @@ from config.settings import Settings
 # command -> locale key of its description; commands handled for every user
 MENU_COMMANDS = (
     ("start", "bot_command_start"),
-    ("connect", "bot_command_connect"),
+    ("subscription", "bot_command_subscription"),
     ("language", "bot_command_language"),
 )
 

@@ -1,4 +1,5 @@
 import hashlib
+import html
 import logging
 import math
 from aiogram import Router, F, types, Bot
@@ -18,26 +19,86 @@ from bot.keyboards.inline.user_keyboards import (
 from bot.services.subscription_service import SubscriptionService
 from bot.services.panel_api_service import PanelApiService
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.device_display import (
+    device_details,
+    device_emoji,
+    device_name,
+    hwid_tails,
+    short_hwid,
+)
 from db.dal import subscription_dal, user_billing_dal
 from db.models import Subscription
 
 router = Router(name="user_subscription_core_router")
 
 
-def _shorten_hwid_for_display(hwid: Optional[str], max_length: int = 24) -> str:
-    """Trim HWID for button text to keep within Telegram limits."""
-    if not hwid:
-        return "-"
-    hwid_str = str(hwid)
-    if len(hwid_str) <= max_length:
-        return hwid_str
-    return f"{hwid_str[:8]}...{hwid_str[-6:]}"
-
-
 def _hwid_callback_token(hwid: Optional[str]) -> str:
     """Stable short token for callback_data; avoids 64b limit with raw HWID."""
     hwid_str = str(hwid or "")
     return hashlib.sha256(hwid_str.encode()).hexdigest()[:32]
+
+
+_BUTTON_NAME_LIMIT = 24
+
+
+def _device_fields(device: dict, get_text, hwid_tail: Optional[str] = None) -> dict:
+    """Placeholders for device texts; the old ones are kept for operator overrides."""
+    name = device_name(device, fallback=get_text("device_unknown_name"))
+    created_at = device.get("createdAt")
+    try:
+        created_at_str = datetime.fromisoformat(str(created_at).replace("Z", "+00:00")).strftime(
+            "%d.%m.%Y") if created_at else "-"
+    except ValueError:
+        created_at_str = str(created_at)
+    button_name = name if len(name) <= _BUTTON_NAME_LIMIT else name[:_BUTTON_NAME_LIMIT - 1] + "…"
+    return {
+        "emoji": device_emoji(device),
+        "name": html.escape(name),
+        "button_name": button_name,
+        "details": html.escape(device_details(device)),
+        "hwid": html.escape(device.get("hwid") or "-"),
+        "hwid_short": short_hwid(hwid_tail),
+        "created_at_str": created_at_str,
+        "device_model": html.escape(device.get("deviceModel") or "-"),
+        "platform": html.escape(device.get("platform") or "-"),
+        "os_version": html.escape(device.get("osVersion") or "-"),
+        "user_agent": html.escape(device.get("userAgent") or "-"),
+    }
+
+
+def build_devices_view(devices: list, get_text, max_devices_display: str):
+    """Device list text and one disconnect button per device.
+
+    Identical devices (same model, OS and app) differ by number, connection date and HWID
+    in the list, and by number and the HWID ending in the buttons.
+    """
+    if not devices:
+        return get_text("no_devices_details_found_message", max_devices=max_devices_display), []
+    tails = hwid_tails(d.get("hwid") for d in devices)
+    blocks, rows = [], []
+    for index, device in enumerate(devices, start=1):
+        fields = _device_fields(device, get_text, tails.get(device.get("hwid")))
+        blocks.append(get_text("device_details", index=index, **fields))
+        if device.get("hwid"):
+            rows.append([InlineKeyboardButton(
+                text=get_text("disconnect_device_button", index=index, **fields),
+                callback_data=f"disconnect_device:{_hwid_callback_token(device['hwid'])}",
+            )])
+    text = get_text("my_devices_details", devices="\n\n".join(blocks),
+                    current_devices=len(devices), max_devices=max_devices_display)
+    return text, rows
+
+
+def build_disconnect_confirmation(device: dict, get_text):
+    fields = _device_fields(device, get_text)
+    token = _hwid_callback_token(device.get("hwid"))
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=get_text("disconnect_device_confirm_button"),
+                              callback_data=f"disconnect_device_do:{token}")],
+        [InlineKeyboardButton(text=get_text("disconnect_device_cancel_button"),
+                              callback_data="main_action:my_devices")],
+    ])
+    return get_text("disconnect_device_confirm", **fields), markup
 
 
 async def refuse_if_disabled_in_panel(
@@ -468,42 +529,10 @@ async def my_devices_command_handler(
         except (TypeError, ValueError):
             max_devices_display = str(max_devices_value)
 
-    if not devices_list_raw:
-        text = get_text("no_devices_details_found_message", max_devices=max_devices_display)
-    else:
-        devices_list = []
-        current_devices = len(devices_list_raw)
-        for index, device in enumerate(devices_list_raw, start=1):
-            device_model = device.get('deviceModel') or None
-            platform = device.get('platform') or None
-            user_agent = device.get('userAgent') or None
-            os_version = device.get('osVersion') or None
-            created_at = device.get('createdAt')
-            hwid = device.get('hwid')
-            try:
-                created_at_str = datetime.fromisoformat(created_at).strftime("%d.%m.%Y %H:%M") if created_at else "-"
-            except Exception:
-                created_at_str = str(created_at)
-
-            device_details = get_text("device_details", index=index, device_model=device_model, platform=platform, os_version=os_version, created_at_str=created_at_str, user_agent=user_agent, hwid=hwid)
-            devices_list.append(device_details)
-
-        text = get_text("my_devices_details", devices="\n\n".join(devices_list), current_devices=current_devices, max_devices=max_devices_display)
+    text, devices_kb = build_devices_view(devices_list_raw, get_text, max_devices_display)
 
     base_markup = get_back_to_main_menu_markup(current_lang, i18n, callback_data="main_action:my_subscription")
-    kb = base_markup.inline_keyboard
-
-    devices_kb = []
-    for index, device in enumerate(devices_list_raw, start=1):
-        hwid = device.get('hwid')
-        if not hwid:
-            continue
-        device_button_text = get_text("disconnect_device_button", hwid=_shorten_hwid_for_display(hwid), index=index)
-        hwid_token = _hwid_callback_token(hwid)
-
-        devices_kb.append([InlineKeyboardButton(text=device_button_text, callback_data=f"disconnect_device:{hwid_token}")])
-    kb = devices_kb + kb
-    markup = InlineKeyboardMarkup(inline_keyboard=kb)
+    markup = InlineKeyboardMarkup(inline_keyboard=devices_kb + base_markup.inline_keyboard)
 
     if isinstance(event, types.CallbackQuery):
         try:
@@ -519,6 +548,7 @@ async def my_devices_command_handler(
 
 
 @router.callback_query(F.data.startswith("disconnect_device:"))
+@router.callback_query(F.data.startswith("disconnect_device_do:"))
 async def disconnect_device_handler(
     callback: types.CallbackQuery,
     settings: Settings,
@@ -528,6 +558,7 @@ async def disconnect_device_handler(
     panel_service: PanelApiService,
     bot: Bot,
 ):
+    """`disconnect_device:` asks for confirmation, `disconnect_device_do:` disconnects."""
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
     get_text = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
@@ -540,7 +571,7 @@ async def disconnect_device_handler(
         return
 
     try:
-        _, hwid_token = callback.data.split(":", 1)
+        action, hwid_token = callback.data.split(":", 1)
     except Exception:
         try:
             await callback.answer(get_text("error_try_again"), show_alert=True)
@@ -564,17 +595,33 @@ async def disconnect_device_handler(
     elif isinstance(devices, list):
         devices_list_raw = devices
 
-    hwid = None
-    for device in devices_list_raw:
-        hwid_candidate = device.get("hwid")
-        if hwid_candidate and _hwid_callback_token(hwid_candidate) == hwid_token:
-            hwid = hwid_candidate
-            break
-
-    if not hwid:
-        await callback.answer(get_text("error_try_again"), show_alert=True)
+    target_device = next(
+        (d for d in devices_list_raw
+         if d.get("hwid") and _hwid_callback_token(d["hwid"]) == hwid_token),
+        None,
+    )
+    if not target_device:
+        # already disconnected (e.g. a stale message): show the current list
+        try:
+            await callback.answer(get_text("device_already_disconnected"), show_alert=True)
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+        await my_devices_command_handler(callback, i18n_data, settings, panel_service, subscription_service, session, bot)
         return
 
+    if action == "disconnect_device":
+        text, markup = build_disconnect_confirmation(target_device, get_text)
+        try:
+            await callback.answer()
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+        try:
+            await callback.message.edit_text(text, reply_markup=markup)
+        except Exception:
+            await callback.message.answer(text, reply_markup=markup)
+        return
+
+    hwid = target_device["hwid"]
     success = await panel_service.disconnect_device(active.get("user_id"), hwid)
     if not success:
         await callback.answer(get_text("error_try_again"), show_alert=True)
@@ -738,7 +785,8 @@ async def autorenew_cancel_from_webhook_button(
     await my_subscription_command_handler(callback, i18n_data, settings, panel_service, subscription_service, session, bot)
 
 
-@router.message(Command("connect"))
+@router.message(Command("subscription"))
+@router.message(Command("connect"))  # older name, kept for users who learned it
 async def connect_command_handler(
     message: types.Message,
     i18n_data: dict,
